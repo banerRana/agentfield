@@ -11,9 +11,6 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
 
   control-plane:
     build:
@@ -27,7 +24,6 @@ services:
       - "8080:8080"
     depends_on:
       - postgres
-      - redis
 
 volumes:
   pgdata:
