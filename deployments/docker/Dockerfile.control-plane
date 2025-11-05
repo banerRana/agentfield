@@ -1,0 +1,26 @@
+FROM node:20-alpine AS ui-builder
+WORKDIR /app/web
+
+COPY control-plane/web/client/package*.json ./
+RUN npm install
+COPY control-plane/web/client/ .
+RUN npm run build
+
+FROM golang:1.23-alpine AS go-builder
+WORKDIR /app
+
+COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    cd control-plane && go mod download
+
+COPY control-plane/ ./control-plane/
+COPY --from=ui-builder /app/web/dist ./control-plane/web/client/dist
+
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    cd control-plane && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/bin/brain-server ./cmd/server
+
+FROM gcr.io/distroless/base-debian12
+COPY --from=go-builder /app/bin/brain-server /usr/local/bin/brain-server
+COPY --from=go-builder /app/control-plane/config /etc/brain/config
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/brain-server"]
