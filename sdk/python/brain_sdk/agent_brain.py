@@ -2,19 +2,25 @@ import asyncio
 import os
 import signal
 import threading
-import time
 from datetime import datetime
-from typing import Optional
 
 import requests
 from brain_sdk.types import AgentStatus, HeartbeatData
-from brain_sdk.logger import log_heartbeat, log_track, log_debug, log_warn, log_error, log_success, log_setup, log_info
+from brain_sdk.logger import (
+    log_heartbeat,
+    log_debug,
+    log_warn,
+    log_error,
+    log_success,
+    log_setup,
+    log_info,
+)
 
 
 class AgentBrain:
     """
     Brain Server Communication handler for Agent class.
-    
+
     This class encapsulates all Brain server communication functionality including:
     - Agent registration with Brain server
     - Heartbeat management (both simple and enhanced)
@@ -26,7 +32,7 @@ class AgentBrain:
     def __init__(self, agent_instance):
         """
         Initialize the Brain handler with a reference to the agent instance.
-        
+
         Args:
             agent_instance: The Agent instance this handler belongs to
         """
@@ -40,19 +46,25 @@ class AgentBrain:
             _resolve_callback_url,
             _is_running_in_container,
         )
-        
+
         # Enhanced debugging for callback URL resolution
-        log_debug(f"Starting callback URL resolution")
+        log_debug("Starting callback URL resolution")
         log_debug(f"Original callback_url parameter: {self.agent.callback_url}")
-        log_debug(f"AGENT_CALLBACK_URL env var: {os.environ.get('AGENT_CALLBACK_URL', 'NOT_SET')}")
+        log_debug(
+            f"AGENT_CALLBACK_URL env var: {os.environ.get('AGENT_CALLBACK_URL', 'NOT_SET')}"
+        )
         log_debug(f"Port: {port}")
         log_debug(f"Running in container: {_is_running_in_container()}")
-        log_debug(f"All env vars containing 'AGENT': {[k for k in os.environ.keys() if 'AGENT' in k.upper()]}")
-        
+        log_debug(
+            f"All env vars containing 'AGENT': {[k for k in os.environ.keys() if 'AGENT' in k.upper()]}"
+        )
+
         # 🔥 FIX: Only resolve callback URL if not already set
         # This prevents overwriting the URL resolved in Agent.__init__()
         if not self.agent.base_url:
-            self.agent.callback_candidates = _build_callback_candidates(self.agent.callback_url, port)
+            self.agent.callback_candidates = _build_callback_candidates(
+                self.agent.callback_url, port
+            )
             if self.agent.callback_candidates:
                 self.agent.base_url = self.agent.callback_candidates[0]
                 log_debug(
@@ -68,15 +80,20 @@ class AgentBrain:
         else:
             # Update port in existing base_url if needed, but preserve Railway internal URLs
             import urllib.parse
+
             parsed = urllib.parse.urlparse(self.agent.base_url)
-            
+
             # Don't modify Railway internal URLs or other container-specific URLs
             if "railway.internal" in parsed.netloc or "internal" in parsed.netloc:
-                log_debug(f"Preserving container-specific callback URL: {self.agent.base_url}")
+                log_debug(
+                    f"Preserving container-specific callback URL: {self.agent.base_url}"
+                )
             elif parsed.port != port:
                 # Update the port in the existing URL
                 self.agent.base_url = f"{parsed.scheme}://{parsed.hostname}:{port}"
-                log_debug(f"Updated port in existing callback URL: {self.agent.base_url}")
+                log_debug(
+                    f"Updated port in existing callback URL: {self.agent.base_url}"
+                )
             else:
                 log_debug(f"Using existing callback URL: {self.agent.base_url}")
 
@@ -84,20 +101,25 @@ class AgentBrain:
             self.agent.callback_candidates = _build_callback_candidates(
                 self.agent.base_url, port
             )
-        elif self.agent.base_url and self.agent.callback_candidates[0] != self.agent.base_url:
+        elif (
+            self.agent.base_url
+            and self.agent.callback_candidates[0] != self.agent.base_url
+        ):
             # Keep resolved base URL at front for clarity
             if self.agent.base_url in self.agent.callback_candidates:
                 self.agent.callback_candidates.remove(self.agent.base_url)
             self.agent.callback_candidates.insert(0, self.agent.base_url)
-        
+
         # Always log the resolved callback URL for debugging
         log_info(f"Final callback URL: {self.agent.base_url}")
-        
+
         if self.agent.dev_mode:
             log_debug(f"Final callback URL: {self.agent.base_url}")
 
         try:
-            log_debug(f"Attempting to register with Brain server at {self.agent.brain_server}")
+            log_debug(
+                f"Attempting to register with Brain server at {self.agent.brain_server}"
+            )
             discovery_payload = self.agent._build_callback_discovery_payload()
 
             success, payload = await self.agent.client.register_agent(
@@ -112,12 +134,14 @@ class AgentBrain:
                     self.agent._apply_discovery_response(payload)
                 log_success(f"Registered node '{self.agent.node_id}' with Brain server")
                 self.agent.brain_connected = True
-                
+
                 # Attempt DID registration after successful Brain registration
                 if self.agent.did_manager:
                     did_success = self.agent._register_agent_with_did()
                     if not did_success and self.agent.dev_mode:
-                        log_warn("DID registration failed, continuing without DID functionality")
+                        log_warn(
+                            "DID registration failed, continuing without DID functionality"
+                        )
             else:
                 log_error("Registration failed")
                 self.agent.brain_connected = False
@@ -127,7 +151,9 @@ class AgentBrain:
             if self.agent.dev_mode:
                 log_warn(f"Brain server not available: {e}")
                 log_setup("Running in development mode - agent will work standalone")
-                log_info(f"To connect to Brain server, start it at {self.agent.brain_server}")
+                log_info(
+                    f"To connect to Brain server, start it at {self.agent.brain_server}"
+                )
             else:
                 log_error(f"Failed to register with Brain server: {e}")
                 if (
@@ -152,11 +178,15 @@ class AgentBrain:
             if response.status_code == 200:
                 log_heartbeat("Heartbeat sent successfully")
             else:
-                log_warn(f"Heartbeat failed with status {response.status_code}: {response.text}")
+                log_warn(
+                    f"Heartbeat failed with status {response.status_code}: {response.text}"
+                )
         except Exception as e:
             log_error(f"Failed to send heartbeat: {e}")
 
-    def heartbeat_worker(self, interval: int = 30):  # pragma: no cover - long-running thread loop
+    def heartbeat_worker(
+        self, interval: int = 30
+    ):  # pragma: no cover - long-running thread loop
         """Background worker that sends periodic heartbeats"""
         if not self.agent.brain_connected:
             log_heartbeat("Heartbeat worker skipped - not connected to Brain server")
@@ -172,7 +202,10 @@ class AgentBrain:
         if not self.agent.brain_connected:
             return  # Skip heartbeat if not connected to Brain
 
-        if self.agent._heartbeat_thread is None or not self.agent._heartbeat_thread.is_alive():
+        if (
+            self.agent._heartbeat_thread is None
+            or not self.agent._heartbeat_thread.is_alive()
+        ):
             self.agent._heartbeat_stop_event.clear()
             self.agent._heartbeat_thread = threading.Thread(
                 target=self.heartbeat_worker, args=(interval,), daemon=True
@@ -213,7 +246,9 @@ class AgentBrain:
             )
 
             if success:
-                log_heartbeat(f"Enhanced heartbeat sent - Status: {self.agent._current_status.value}")
+                log_heartbeat(
+                    f"Enhanced heartbeat sent - Status: {self.agent._current_status.value}"
+                )
 
             return success
 
@@ -233,7 +268,9 @@ class AgentBrain:
             return False
 
         try:
-            success = await self.agent.client.notify_graceful_shutdown(self.agent.node_id)
+            success = await self.agent.client.notify_graceful_shutdown(
+                self.agent.node_id
+            )
             if self.agent.dev_mode and success:
                 log_success("Graceful shutdown notification sent")
             return success
@@ -242,7 +279,9 @@ class AgentBrain:
                 log_error(f"Shutdown notification failed: {e}")
             return False
 
-    def setup_fast_lifecycle_signal_handlers(self) -> None:  # pragma: no cover - requires OS signal integration
+    def setup_fast_lifecycle_signal_handlers(
+        self,
+    ) -> None:  # pragma: no cover - requires OS signal integration
         """
         Setup signal handler for fast lifecycle status while allowing uvicorn to perform graceful shutdown.
 
@@ -265,7 +304,9 @@ class AgentBrain:
 
             # Best-effort immediate notification to Brain
             try:
-                success = self.agent.client.notify_graceful_shutdown_sync(self.agent.node_id)
+                success = self.agent.client.notify_graceful_shutdown_sync(
+                    self.agent.node_id
+                )
                 if self.agent.dev_mode:
                     state = "sent" if success else "failed"
                     log_info(f"Shutdown notification {state}")
@@ -281,6 +322,7 @@ class AgentBrain:
             except Exception:
                 # Fallback: polite exit (still allows finally blocks/atexit to run)
                 import sys
+
                 sys.exit(0)
 
         try:
@@ -293,7 +335,9 @@ class AgentBrain:
             if self.agent.dev_mode:
                 log_error(f"Failed to setup signal handlers: {e}")
 
-    async def register_with_fast_lifecycle(self, port: int) -> bool:  # pragma: no cover - fast-path relies on external coordination
+    async def register_with_fast_lifecycle(
+        self, port: int
+    ) -> bool:  # pragma: no cover - fast-path relies on external coordination
         """
         Register agent with immediate status reporting for fast lifecycle.
 
@@ -359,7 +403,9 @@ class AgentBrain:
 
         try:
             if self.agent.dev_mode:
-                log_info(f"Fast registration with Brain server at {self.agent.brain_server}")
+                log_info(
+                    f"Fast registration with Brain server at {self.agent.brain_server}"
+                )
                 log_info(f"Using callback URL: {self.agent.base_url}")
 
             # Register with STARTING status for immediate visibility
@@ -378,15 +424,19 @@ class AgentBrain:
                 if payload:
                     self.agent._apply_discovery_response(payload)
                 if self.agent.dev_mode:
-                    log_success(f"Fast registration successful - Status: {AgentStatus.STARTING.value}")
+                    log_success(
+                        f"Fast registration successful - Status: {AgentStatus.STARTING.value}"
+                    )
                 self.agent.brain_connected = True
-                
+
                 # Attempt DID registration after successful Brain registration
                 if self.agent.did_manager:
                     did_success = self.agent._register_agent_with_did()
                     if not did_success and self.agent.dev_mode:
-                        log_warn("DID registration failed, continuing without DID functionality")
-                
+                        log_warn(
+                            "DID registration failed, continuing without DID functionality"
+                        )
+
                 return True
             else:
                 if self.agent.dev_mode:

@@ -25,7 +25,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24.2'
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -58,12 +58,11 @@ jobs:
         working-directory: control-plane
         run: go test ./...
 
-      - name: Lint (optional)
+      - name: Lint
         working-directory: control-plane
         run: |
           go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
           golangci-lint run
-        continue-on-error: true
 
   compile-matrix:
     runs-on: ubuntu-latest
@@ -84,7 +83,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24.2'
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -114,4 +113,19 @@ jobs:
         working-directory: control-plane
         run: |
           echo "Building for ${GOOS}/${GOARCH}"
-          go build -o /tmp/brain-server-${GOOS}-${GOARCH} ./cmd/server
+          go build -o /tmp/brain-server-${GOOS}-${GOARCH} ./cmd/brain-server
+
+  # Summary job that depends on all critical checks
+  required-checks:
+    name: All Required Checks Passed
+    runs-on: ubuntu-latest
+    needs: [linux-tests, compile-matrix]
+    if: always()
+    steps:
+      - name: Check all jobs
+        run: |
+          if [ "${{ needs.linux-tests.result }}" != "success" ] || [ "${{ needs.compile-matrix.result }}" != "success" ]; then
+            echo "One or more required checks failed"
+            exit 1
+          fi
+          echo "All required checks passed successfully"

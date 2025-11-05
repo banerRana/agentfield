@@ -39,7 +39,9 @@ class DummyBrainClient:
         )
         return True, {"resolved_base_url": base_url}
 
-    async def send_enhanced_heartbeat(self, node_id: str, heartbeat: HeartbeatData) -> bool:
+    async def send_enhanced_heartbeat(
+        self, node_id: str, heartbeat: HeartbeatData
+    ) -> bool:
         self.heartbeat_calls.append({"node_id": node_id, "heartbeat": heartbeat})
         return True
 
@@ -66,7 +68,11 @@ class StubAgent:
     async_config: Any = None
     client: DummyBrainClient = field(default_factory=DummyBrainClient)
     did_manager: Any = None
-    mcp_handler: Any = field(default_factory=lambda: type("MCP", (), {"_get_mcp_server_health": lambda self: []})())
+    mcp_handler: Any = field(
+        default_factory=lambda: type(
+            "MCP", (), {"_get_mcp_server_health": lambda self: []}
+        )()
+    )
     reasoners: List[Dict[str, Any]] = field(default_factory=list)
     skills: List[Dict[str, Any]] = field(default_factory=list)
     brain_connected: bool = True
@@ -79,27 +85,37 @@ class StubAgent:
         self._shutdown_requested = False
         self._current_execution_context = None
         if self.ai_config is None:
-            self.ai_config = type("Cfg", (), {"rate_limit_max_retries": 1,
-                                               "rate_limit_base_delay": 0.1,
-                                               "rate_limit_max_delay": 1.0,
-                                               "rate_limit_jitter_factor": 0.1,
-                                               "rate_limit_circuit_breaker_threshold": 3,
-                                               "rate_limit_circuit_breaker_timeout": 1,
-                                               "model": "gpt",
-                                               "audio_model": "gpt",
-                                               "vision_model": "gpt",
-                                               "copy": lambda self, deep=False: self,
-                                               "get_model_limits": lambda self, model=None: asyncio.sleep(0)})()
+            self.ai_config = type(
+                "Cfg",
+                (),
+                {
+                    "rate_limit_max_retries": 1,
+                    "rate_limit_base_delay": 0.1,
+                    "rate_limit_max_delay": 1.0,
+                    "rate_limit_jitter_factor": 0.1,
+                    "rate_limit_circuit_breaker_threshold": 3,
+                    "rate_limit_circuit_breaker_timeout": 1,
+                    "model": "gpt",
+                    "audio_model": "gpt",
+                    "vision_model": "gpt",
+                    "copy": lambda self, deep=False: self,
+                    "get_model_limits": lambda self, model=None: asyncio.sleep(0),
+                },
+            )()
         if self.async_config is None:
-            self.async_config = type("AsyncCfg", (), {
-                "enable_async_execution": True,
-                "enable_batch_polling": True,
-                "batch_size": 4,
-                "fallback_to_sync": True,
-                "connection_pool_size": 4,
-                "connection_pool_per_host": 4,
-                "polling_timeout": 5.0,
-            })()
+            self.async_config = type(
+                "AsyncCfg",
+                (),
+                {
+                    "enable_async_execution": True,
+                    "enable_batch_polling": True,
+                    "batch_size": 4,
+                    "fallback_to_sync": True,
+                    "connection_pool_size": 4,
+                    "connection_pool_per_host": 4,
+                    "polling_timeout": 5.0,
+                },
+            )()
 
     def _register_agent_with_did(self):
         return True
@@ -116,7 +132,9 @@ class StubAgent:
     def _apply_discovery_response(self, payload: Optional[Dict[str, Any]]) -> None:
         if not payload:
             return
-        resolved = payload.get("resolved_base_url") if isinstance(payload, dict) else None
+        resolved = (
+            payload.get("resolved_base_url") if isinstance(payload, dict) else None
+        )
         if resolved:
             self.base_url = resolved
 
@@ -135,7 +153,7 @@ class DummyAsyncExecutionManager:
         return None
 
     async def submit_execution(self, target, input_data, headers, timeout):
-        execution_id = f"exec-{len(self.submissions)+1}"
+        execution_id = f"exec-{len(self.submissions) + 1}"
         self.submissions.append(
             {
                 "execution_id": execution_id,
@@ -219,7 +237,9 @@ def create_test_agent(
         async def set(self, key: str, data: Any, scope: Optional[str] = None) -> None:
             memory_store[key] = data
 
-        async def get(self, key: str, default: Any = None, scope: Optional[str] = None) -> Any:
+        async def get(
+            self, key: str, default: Any = None, scope: Optional[str] = None
+        ) -> Any:
             return memory_store.get(key, default)
 
         async def exists(self, key: str, scope: Optional[str] = None) -> bool:
@@ -333,7 +353,14 @@ def create_test_agent(
         parent_execution_id: Optional[str] = None,
     ) -> None:
         events = getattr(self.agent, "_captured_workflow_events", [])
-        events.append(("complete", execution_id, getattr(context, "reasoner_name", "unknown"), parent_execution_id))
+        events.append(
+            (
+                "complete",
+                execution_id,
+                getattr(context, "reasoner_name", "unknown"),
+                parent_execution_id,
+            )
+        )
         self.agent._captured_workflow_events = events
 
     async def _record_call_error(
@@ -347,7 +374,15 @@ def create_test_agent(
         parent_execution_id: Optional[str] = None,
     ) -> None:
         events = getattr(self.agent, "_captured_workflow_events", [])
-        events.append(("error", execution_id, getattr(context, "reasoner_name", "unknown"), parent_execution_id, error))
+        events.append(
+            (
+                "error",
+                execution_id,
+                getattr(context, "reasoner_name", "unknown"),
+                parent_execution_id,
+                error,
+            )
+        )
         self.agent._captured_workflow_events = events
 
     async def _noop_fire_and_forget_update(self, payload: Dict[str, Any]) -> None:
@@ -361,13 +396,26 @@ def create_test_agent(
     monkeypatch.setattr("brain_sdk.agent.AgentMCP", _FakeAgentMCP)
     monkeypatch.setattr("brain_sdk.agent.MCPManager", _FakeMCPManager)
     monkeypatch.setattr("brain_sdk.agent.MCPClientRegistry", _FakeMCPClientRegistry)
-    monkeypatch.setattr("brain_sdk.agent.DynamicMCPSkillManager", _FakeDynamicSkillManager)
+    monkeypatch.setattr(
+        "brain_sdk.agent.DynamicMCPSkillManager", _FakeDynamicSkillManager
+    )
     monkeypatch.setattr("brain_sdk.agent.DIDManager", _FakeDIDManager)
     monkeypatch.setattr("brain_sdk.agent.VCGenerator", _FakeVCGenerator)
-    monkeypatch.setattr(AgentWorkflow, "notify_call_start", _record_call_start, raising=False)
-    monkeypatch.setattr(AgentWorkflow, "notify_call_complete", _record_call_complete, raising=False)
-    monkeypatch.setattr(AgentWorkflow, "notify_call_error", _record_call_error, raising=False)
-    monkeypatch.setattr(AgentWorkflow, "fire_and_forget_update", _noop_fire_and_forget_update, raising=False)
+    monkeypatch.setattr(
+        AgentWorkflow, "notify_call_start", _record_call_start, raising=False
+    )
+    monkeypatch.setattr(
+        AgentWorkflow, "notify_call_complete", _record_call_complete, raising=False
+    )
+    monkeypatch.setattr(
+        AgentWorkflow, "notify_call_error", _record_call_error, raising=False
+    )
+    monkeypatch.setattr(
+        AgentWorkflow,
+        "fire_and_forget_update",
+        _noop_fire_and_forget_update,
+        raising=False,
+    )
 
     agent = Agent(
         node_id=node_id,

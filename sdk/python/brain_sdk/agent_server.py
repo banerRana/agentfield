@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import os
 import signal
 from datetime import datetime
@@ -6,7 +7,6 @@ from typing import Optional
 
 import uvicorn
 from brain_sdk.agent_utils import AgentUtils
-from brain_sdk.execution_context import ExecutionContext
 from brain_sdk.logger import log_debug, log_error, log_info, log_success, log_warn
 from brain_sdk.utils import get_free_port
 from fastapi import Request
@@ -606,7 +606,7 @@ class AgentServer:
             try:
                 if hasattr(self.agent, "mcp_handler") and self.agent.mcp_handler:
                     self.agent.mcp_handler._cleanup_mcp_servers()
-            except:
+            except Exception:
                 pass  # Ignore errors in immediate shutdown
 
             # Exit immediately
@@ -740,29 +740,14 @@ class AgentServer:
             "orjson": False,
         }
 
-        # Check uvloop
-        try:
-            import uvloop
-
+        if importlib.util.find_spec("uvloop") is not None:
             deps["uvloop"] = True
-        except ImportError:
-            pass
 
-        # Check psutil
-        try:
-            import psutil
-
+        if importlib.util.find_spec("psutil") is not None:
             deps["psutil"] = True
-        except ImportError:
-            pass
 
-        # Check orjson
-        try:
-            import orjson
-
+        if importlib.util.find_spec("orjson") is not None:
             deps["orjson"] = True
-        except ImportError:
-            pass
 
         return deps
 
@@ -899,7 +884,9 @@ class AgentServer:
                     port = alternative_port
                 except RuntimeError:
                     if self.agent.dev_mode:
-                        log_warn(f"No alternative ports found, attempting to use {port}")
+                        log_warn(
+                            f"No alternative ports found, attempting to use {port}"
+                        )
                     # Continue with original port (will fail if truly unavailable)
 
         log_info(f"Starting agent node '{self.agent.node_id}' on port {port}")
@@ -1107,15 +1094,12 @@ class AgentServer:
             uvicorn_config.update(production_config)
 
             # Try to use uvloop for better performance
-            try:
-                import uvloop
-
+            if importlib.util.find_spec("uvloop") is not None:
                 uvicorn_config["loop"] = "uvloop"
                 if self.agent.dev_mode:
                     log_info("Using uvloop for enhanced performance")
-            except ImportError:
-                if self.agent.dev_mode:
-                    log_warn("uvloop not available, using default asyncio loop")
+            elif self.agent.dev_mode:
+                log_warn("uvloop not available, using default asyncio loop")
 
         # Environment-based log level adjustment
         env_log_level = os.getenv("UVICORN_LOG_LEVEL", log_level).lower()
@@ -1145,7 +1129,9 @@ class AgentServer:
                     f"Port {port} is already in use. Choose a different port or stop the conflicting service."
                 )
                 if self.agent.dev_mode:
-                    log_info("Try using auto_port=True or set a different port explicitly")
+                    log_info(
+                        "Try using auto_port=True or set a different port explicitly"
+                    )
             else:
                 log_error(f"Failed to start server: {e}")
             raise

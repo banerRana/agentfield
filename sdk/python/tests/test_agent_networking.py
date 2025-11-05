@@ -4,7 +4,6 @@ import pytest
 
 from brain_sdk import agent as agent_mod
 from brain_sdk.agent import (
-    Agent,
     ExecutionContext,
     _build_callback_candidates,
     _normalize_candidate,

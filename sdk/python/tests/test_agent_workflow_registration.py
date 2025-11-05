@@ -3,7 +3,11 @@ import pytest
 from brain_sdk.agent_workflow import AgentWorkflow
 from brain_sdk.agent_registry import set_current_agent, clear_current_agent
 from brain_sdk.decorators import _execute_with_tracking
-from brain_sdk.execution_context import ExecutionContext, set_execution_context, reset_execution_context
+from brain_sdk.execution_context import (
+    ExecutionContext,
+    set_execution_context,
+    reset_execution_context,
+)
 
 
 class DummyResponse:
@@ -46,7 +50,9 @@ class DummyWorkflowHandler:
         self.ensure_calls = []
         self.updates = []
 
-    async def _ensure_execution_registered(self, context, reasoner_name, parent_context):
+    async def _ensure_execution_registered(
+        self, context, reasoner_name, parent_context
+    ):
         self.ensure_calls.append((context, reasoner_name, parent_context))
         context.execution_id = "exec-child"
         context.registered = True

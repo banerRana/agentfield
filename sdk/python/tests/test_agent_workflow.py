@@ -13,7 +13,9 @@ async def test_execute_with_tracking_root_context(monkeypatch):
 
     captured = {}
 
-    async def fake_start(execution_id, context, reasoner_name, input_data, parent_execution_id=None):
+    async def fake_start(
+        execution_id, context, reasoner_name, input_data, parent_execution_id=None
+    ):
         captured["start"] = {
             "execution_id": execution_id,
             "workflow_id": context.workflow_id,
@@ -22,7 +24,9 @@ async def test_execute_with_tracking_root_context(monkeypatch):
             "input": input_data,
         }
 
-    async def fake_complete(execution_id, workflow_id, result, duration_ms, context, **kwargs):
+    async def fake_complete(
+        execution_id, workflow_id, result, duration_ms, context, **kwargs
+    ):
         captured["complete"] = {
             "execution_id": execution_id,
             "workflow_id": workflow_id,
@@ -59,8 +63,12 @@ async def test_execute_with_tracking_child_context(monkeypatch):
 
     events = {}
 
-    async def fake_start(execution_id, context, reasoner_name, input_data, parent_execution_id=None):
-        events.setdefault("start", []).append((execution_id, context, parent_execution_id))
+    async def fake_start(
+        execution_id, context, reasoner_name, input_data, parent_execution_id=None
+    ):
+        events.setdefault("start", []).append(
+            (execution_id, context, parent_execution_id)
+        )
 
     async def fake_error(*args, **kwargs):
         events["error"] = True
@@ -138,7 +146,9 @@ async def test_execute_with_tracking_emits_workflow_updates(monkeypatch):
 
         events = {}
 
-        async def capture_start(execution_id, context, reasoner_name, input_data, parent_execution_id=None):
+        async def capture_start(
+            execution_id, context, reasoner_name, input_data, parent_execution_id=None
+        ):
             events.setdefault("start", []).append(
                 {
                     "execution_id": execution_id,
@@ -172,7 +182,9 @@ async def test_execute_with_tracking_emits_workflow_updates(monkeypatch):
         monkeypatch.setattr(workflow, "notify_call_start", capture_start)
         monkeypatch.setattr(workflow, "notify_call_complete", capture_complete)
 
-        async def child_reasoner(value: int, execution_context: ExecutionContext = None):
+        async def child_reasoner(
+            value: int, execution_context: ExecutionContext = None
+        ):
             assert execution_context is not None
             return {"doubled": value * 2}
 
@@ -191,14 +203,18 @@ async def test_execute_with_tracking_emits_workflow_updates(monkeypatch):
     assert start_event["context"].parent_execution_id == parent_context.execution_id
     assert start_event["reasoner_name"] == "child_reasoner"
     assert start_event["input_data"]["value"] == 7
-    assert isinstance(start_event["input_data"].get("execution_context"), ExecutionContext)
+    assert isinstance(
+        start_event["input_data"].get("execution_context"), ExecutionContext
+    )
 
     assert complete_event["parent_execution_id"] == parent_context.execution_id
     assert complete_event["context"].parent_workflow_id == parent_context.workflow_id
     assert complete_event["context"].parent_execution_id == parent_context.execution_id
     assert complete_event["result"] == {"doubled": 14}
     assert complete_event["input_data"]["value"] == 7
-    assert isinstance(complete_event["input_data"].get("execution_context"), ExecutionContext)
+    assert isinstance(
+        complete_event["input_data"].get("execution_context"), ExecutionContext
+    )
 
 
 @pytest.mark.asyncio
@@ -213,7 +229,9 @@ async def test_execute_with_tracking_error_emits_failure(monkeypatch):
 
         events = {}
 
-        async def capture_start(execution_id, context, reasoner_name, input_data, parent_execution_id=None):
+        async def capture_start(
+            execution_id, context, reasoner_name, input_data, parent_execution_id=None
+        ):
             events.setdefault("start", []).append(
                 {
                     "execution_id": execution_id,
@@ -247,7 +265,9 @@ async def test_execute_with_tracking_error_emits_failure(monkeypatch):
         monkeypatch.setattr(workflow, "notify_call_start", capture_start)
         monkeypatch.setattr(workflow, "notify_call_error", capture_error)
 
-        async def failing_reasoner(value: int, execution_context: ExecutionContext = None):
+        async def failing_reasoner(
+            value: int, execution_context: ExecutionContext = None
+        ):
             raise RuntimeError("expected failure")
 
         with pytest.raises(RuntimeError):
@@ -263,12 +283,16 @@ async def test_execute_with_tracking_error_emits_failure(monkeypatch):
     assert start_event["parent_execution_id"] == parent_context.execution_id
     assert start_event["context"].parent_workflow_id == parent_context.workflow_id
     assert start_event["input_data"]["value"] == 5
-    assert isinstance(start_event["input_data"].get("execution_context"), ExecutionContext)
+    assert isinstance(
+        start_event["input_data"].get("execution_context"), ExecutionContext
+    )
 
     assert error_event["parent_execution_id"] == parent_context.execution_id
     assert error_event["context"].parent_workflow_id == parent_context.workflow_id
     assert error_event["input_data"]["value"] == 5
-    assert isinstance(error_event["input_data"].get("execution_context"), ExecutionContext)
+    assert isinstance(
+        error_event["input_data"].get("execution_context"), ExecutionContext
+    )
     assert "expected failure" in error_event["error"]
 
 
@@ -313,13 +337,17 @@ async def test_nested_reasoners_emit_child_completion_before_parent(monkeypatch)
     assert timeline[1] == ("child_reasoner", "running")
 
     child_complete_index = next(
-        index for index, entry in enumerate(timeline)
+        index
+        for index, entry in enumerate(timeline)
         if entry == ("child_reasoner", "succeeded")
     )
 
     parent_complete_index = next(
-        index for index, entry in enumerate(timeline)
+        index
+        for index, entry in enumerate(timeline)
         if entry[1] == "succeeded" and entry[0].endswith("parent_reasoner")
     )
 
-    assert child_complete_index < parent_complete_index, "Parent reasoner completion emitted before child finished"
+    assert child_complete_index < parent_complete_index, (
+        "Parent reasoner completion emitted before child finished"
+    )

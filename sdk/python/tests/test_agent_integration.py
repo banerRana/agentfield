@@ -154,10 +154,9 @@ async def test_agent_router_prefix_sanitization(monkeypatch):
 
     agent.include_router(router)
 
-    assert any(
-        r["id"] == "users_profile_v1_fetch_order" for r in agent.reasoners
-    )
+    assert any(r["id"] == "users_profile_v1_fetch_order" for r in agent.reasoners)
     assert hasattr(agent, "users_profile_v1_fetch_order")
+
 
 @pytest.mark.asyncio
 async def test_callback_url_precedence_and_env(monkeypatch):
@@ -168,7 +167,10 @@ async def test_callback_url_precedence_and_env(monkeypatch):
     )
     await explicit_agent.brain_handler.register_with_brain_server(port=9200)
     assert explicit_agent.base_url == "https://explicit.example.com:9200"
-    assert explicit_client.register_calls[-1]["base_url"] == "https://explicit.example.com:9200"
+    assert (
+        explicit_client.register_calls[-1]["base_url"]
+        == "https://explicit.example.com:9200"
+    )
 
     env_agent, env_client = create_test_agent(monkeypatch)
     await env_agent.brain_handler.register_with_brain_server(port=9300)

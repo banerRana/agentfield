@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
@@ -50,7 +49,9 @@ async def test_execute_with_tracking_success(monkeypatch):
         captured.setdefault("complete", []).append((ctx, result))
 
     monkeypatch.setattr("brain_sdk.decorators._send_workflow_start", record_start)
-    monkeypatch.setattr("brain_sdk.decorators._send_workflow_completion", record_complete)
+    monkeypatch.setattr(
+        "brain_sdk.decorators._send_workflow_completion", record_complete
+    )
 
     agent = StubAgent()
     set_current_agent(agent)
@@ -90,7 +91,9 @@ async def test_execute_with_tracking_error(monkeypatch):
     async def record_error(agent, ctx, message, duration_ms, payload):
         calls.setdefault("error", []).append((ctx, message))
 
-    monkeypatch.setattr("brain_sdk.decorators._send_workflow_start", lambda *a, **k: asyncio.sleep(0))
+    monkeypatch.setattr(
+        "brain_sdk.decorators._send_workflow_start", lambda *a, **k: asyncio.sleep(0)
+    )
     monkeypatch.setattr("brain_sdk.decorators._send_workflow_error", record_error)
 
     agent = StubAgent()

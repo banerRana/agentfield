@@ -1,5 +1,9 @@
 import asyncio
-from brain_sdk.connection_manager import ConnectionManager, ConnectionConfig, ConnectionState
+from brain_sdk.connection_manager import (
+    ConnectionManager,
+    ConnectionConfig,
+    ConnectionState,
+)
 
 
 class FakeClient:
@@ -28,14 +32,15 @@ def test_start_enters_reconnecting_and_stop_quick(monkeypatch):
     cfg = ConnectionConfig(retry_interval=0.01, health_check_interval=0.01)
     mgr = ConnectionManager(agent, cfg)
 
-
     async def fake_reconnect_loop(self):
         # Simulate a quick state flip then exit
         self.state = ConnectionState.RECONNECTING
         await asyncio.sleep(0)
 
     # Monkeypatch the reconnection loop to avoid long-running task
-    monkeypatch.setattr(ConnectionManager, "_reconnection_loop", fake_reconnect_loop, raising=False)
+    monkeypatch.setattr(
+        ConnectionManager, "_reconnection_loop", fake_reconnect_loop, raising=False
+    )
 
     async def run():
         ok = await mgr.start()

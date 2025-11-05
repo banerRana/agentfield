@@ -1,4 +1,3 @@
-import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -63,9 +62,11 @@ async def test_dynamic_skill_registration(monkeypatch):
 
     client_stub = app.mcp_client_registry.get_client("server")
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post(
-        "/skills/server_Echo",
+            "/skills/server_Echo",
             json={"text": "hello"},
             headers={"x-workflow-id": "wf", "x-execution-id": "exec"},
         )

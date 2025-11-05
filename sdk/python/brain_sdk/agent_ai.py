@@ -9,22 +9,26 @@ from brain_sdk.logger import log_debug, log_error, log_warn
 from brain_sdk.rate_limiter import StatelessRateLimiter
 from httpx import HTTPStatusError
 from pydantic import BaseModel
+
 # Expose module-level symbols for patching in tests
 try:
     import litellm as litellm  # type: ignore
 except Exception:  # pragma: no cover - test environments may not have litellm
+
     class _LiteLLMStub:
         pass
+
     litellm = _LiteLLMStub()  # type: ignore
 
 try:
     import openai as openai  # type: ignore
 except Exception:  # pragma: no cover - test environments may not have openai
+
     class _OpenAIStub:
         class OpenAI:
             pass
-    openai = _OpenAIStub()  # type: ignore
 
+    openai = _OpenAIStub()  # type: ignore
 
 
 class AgentAI:
@@ -260,7 +264,7 @@ class AgentAI:
 
         # Apply prompt trimming using LiteLLM's token-aware utility instead of char-based limits
         try:
-            from litellm.utils import get_max_tokens, token_counter, trim_messages
+            from litellm.utils import token_counter, trim_messages
         except ImportError:
             raise ImportError(
                 "litellm is required for token-aware prompt trimming. Please install it with `pip install litellm`"
@@ -268,26 +272,20 @@ class AgentAI:
 
         # Determine model context length using multiple fallback strategies
         model_context_length = None
-        detection_method = "unknown"
 
         # Strategy 1: Use explicit max_input_tokens from config
         if hasattr(final_config, "max_input_tokens") and final_config.max_input_tokens:
             model_context_length = final_config.max_input_tokens
-            detection_method = "explicit_config"
 
         # Strategy 3: Use fallback model mappings
-        if not model_context_length:
-            if hasattr(final_config, "_MODEL_CONTEXT_LIMITS"):
-                model_context_length = final_config._MODEL_CONTEXT_LIMITS.get(
-                    final_config.model
-                )
-                if model_context_length:
-                    detection_method = "fallback_mapping"
+        if not model_context_length and hasattr(final_config, "_MODEL_CONTEXT_LIMITS"):
+            candidate_limit = final_config._MODEL_CONTEXT_LIMITS.get(final_config.model)
+            if candidate_limit:
+                model_context_length = candidate_limit
 
         # Strategy 4: Conservative fallback with warning
         if not model_context_length:
             model_context_length = 10192  # More reasonable than 4096
-            detection_method = "conservative_fallback"
 
         # Calculate safe input token limit: context_length - max_output_tokens - buffer
         output_tokens = (
@@ -329,7 +327,8 @@ class AgentAI:
         # Prepare LiteLLM parameters using the config's method
         # This leverages LiteLLM's standard environment variable handling and smart token management
         litellm_params = final_config.get_litellm_params(
-            messages=messages, **kwargs  # Runtime overrides have highest priority
+            messages=messages,
+            **kwargs,  # Runtime overrides have highest priority
         )
 
         # Ensure messages are always included in the final params
@@ -344,9 +343,6 @@ class AgentAI:
         # Define the LiteLLM call function for rate limiter
         async def _make_litellm_call():
             return await litellm.acompletion(**litellm_params)
-
-        # Execute with rate limiting and retries/fallbacks if enabled
-        from litellm import completion as litellm_completion
 
         async def _execute_with_fallbacks():
             # Check for configured fallback models in AI config
@@ -831,7 +827,6 @@ class AgentAI:
         from brain_sdk.multimodal_response import (
             AudioOutput,
             MultimodalResponse,
-            detect_multimodal_response,
         )
 
         # Combine all text inputs

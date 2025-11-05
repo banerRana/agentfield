@@ -1,7 +1,5 @@
 import datetime
 
-import pytest
-
 from brain_sdk.did_manager import DIDManager, DIDIdentityPackage
 
 

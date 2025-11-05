@@ -15,8 +15,14 @@ def test_detect_input_type_and_helpers(tmp_path):
     assert AgentUtils.detect_input_type(str(img)) == "image_file"
 
     # Dict/list detection
-    assert AgentUtils.detect_input_type({"role": "user", "content": "hi"}) == "message_dict"
-    assert AgentUtils.detect_input_type([{"role": "user", "content": "hi"}]) == "conversation_list"
+    assert (
+        AgentUtils.detect_input_type({"role": "user", "content": "hi"})
+        == "message_dict"
+    )
+    assert (
+        AgentUtils.detect_input_type([{"role": "user", "content": "hi"}])
+        == "conversation_list"
+    )
 
     # Helpers
     assert AgentUtils.is_image_url("x.PNG") is True
@@ -30,7 +36,10 @@ def test_generate_skill_name_and_schema():
 
     tool = {
         "input_schema": {
-            "properties": {"q": {"type": "string"}, "n": {"type": "integer", "default": 1}},
+            "properties": {
+                "q": {"type": "string"},
+                "n": {"type": "integer", "default": 1},
+            },
             "required": ["q"],
         }
     }
@@ -47,7 +56,9 @@ def test_detect_input_type_bytes_and_structured(tmp_path):
 
     payload = {"image": "https://example.com/foo.png"}
     assert AgentUtils.detect_input_type(payload) == "structured_input"
-    assert AgentUtils.detect_input_type(["hello", {"image": "data"}]) == "multimodal_list"
+    assert (
+        AgentUtils.detect_input_type(["hello", {"image": "data"}]) == "multimodal_list"
+    )
 
 
 def test_serialize_result_handles_complex_objects():

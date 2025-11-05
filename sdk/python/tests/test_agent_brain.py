@@ -1,4 +1,3 @@
-import asyncio
 import threading
 
 import pytest
@@ -14,7 +13,10 @@ async def test_register_with_brain_server_sets_base_url(monkeypatch):
     agent.client = DummyBrainClient()
     agent.brain_connected = False
 
-    monkeypatch.setattr("brain_sdk.agent._resolve_callback_url", lambda url, port: f"http://resolved:{port}")
+    monkeypatch.setattr(
+        "brain_sdk.agent._resolve_callback_url",
+        lambda url, port: f"http://resolved:{port}",
+    )
     monkeypatch.setattr(
         "brain_sdk.agent._build_callback_candidates",
         lambda value, port, include_defaults=True: [f"http://resolved:{port}"],
@@ -55,7 +57,10 @@ async def test_register_with_brain_updates_existing_port(monkeypatch):
     agent = StubAgent(callback_url=None, base_url="http://host:5000")
     agent.client = DummyBrainClient()
 
-    monkeypatch.setattr("brain_sdk.agent._build_callback_candidates", lambda value, port, include_defaults=True: [])
+    monkeypatch.setattr(
+        "brain_sdk.agent._build_callback_candidates",
+        lambda value, port, include_defaults=True: [],
+    )
     monkeypatch.setattr("brain_sdk.agent._is_running_in_container", lambda: False)
 
     brain = AgentBrain(agent)
@@ -67,10 +72,17 @@ async def test_register_with_brain_updates_existing_port(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_register_with_brain_preserves_container_urls(monkeypatch):
-    agent = StubAgent(callback_url=None, base_url="http://service.railway.internal:5000", dev_mode=True)
+    agent = StubAgent(
+        callback_url=None,
+        base_url="http://service.railway.internal:5000",
+        dev_mode=True,
+    )
     agent.client = DummyBrainClient()
 
-    monkeypatch.setattr("brain_sdk.agent._build_callback_candidates", lambda value, port, include_defaults=True: [])
+    monkeypatch.setattr(
+        "brain_sdk.agent._build_callback_candidates",
+        lambda value, port, include_defaults=True: [],
+    )
     monkeypatch.setattr("brain_sdk.agent._is_running_in_container", lambda: True)
 
     brain = AgentBrain(agent)
@@ -84,8 +96,13 @@ async def test_register_with_brain_server_resolves_when_no_candidates(monkeypatc
     agent = StubAgent(callback_url=None, base_url=None)
     agent.client = DummyBrainClient()
 
-    monkeypatch.setattr("brain_sdk.agent._build_callback_candidates", lambda *a, **k: [])
-    monkeypatch.setattr("brain_sdk.agent._resolve_callback_url", lambda url, port: f"http://resolved:{port}")
+    monkeypatch.setattr(
+        "brain_sdk.agent._build_callback_candidates", lambda *a, **k: []
+    )
+    monkeypatch.setattr(
+        "brain_sdk.agent._resolve_callback_url",
+        lambda url, port: f"http://resolved:{port}",
+    )
     monkeypatch.setattr("brain_sdk.agent._is_running_in_container", lambda: False)
 
     brain = AgentBrain(agent)
@@ -101,7 +118,10 @@ async def test_register_with_brain_server_reorders_candidates(monkeypatch):
     agent.client = DummyBrainClient()
     agent.callback_candidates = ["http://other:8000", "http://preferred:8000"]
 
-    monkeypatch.setattr("brain_sdk.agent._build_callback_candidates", lambda value, port, include_defaults=True: agent.callback_candidates)
+    monkeypatch.setattr(
+        "brain_sdk.agent._build_callback_candidates",
+        lambda value, port, include_defaults=True: agent.callback_candidates,
+    )
     monkeypatch.setattr("brain_sdk.agent._is_running_in_container", lambda: False)
 
     brain = AgentBrain(agent)
@@ -126,8 +146,12 @@ async def test_register_with_brain_server_propagates_request_exception(monkeypat
     agent = StubAgent(callback_url=None, base_url="http://already", dev_mode=False)
     agent.client = DummyBrainClient()
     monkeypatch.setattr(agent.client, "register_agent", failing_register)
-    monkeypatch.setattr("brain_sdk.agent._build_callback_candidates", lambda *a, **k: [])
-    monkeypatch.setattr("brain_sdk.agent._resolve_callback_url", lambda url, port: "http://already")
+    monkeypatch.setattr(
+        "brain_sdk.agent._build_callback_candidates", lambda *a, **k: []
+    )
+    monkeypatch.setattr(
+        "brain_sdk.agent._resolve_callback_url", lambda url, port: "http://already"
+    )
     monkeypatch.setattr("brain_sdk.agent._is_running_in_container", lambda: False)
 
     brain = AgentBrain(agent)
@@ -145,8 +169,12 @@ async def test_register_with_brain_server_unsuccessful_response(monkeypatch):
         return False, None
 
     monkeypatch.setattr(agent.client, "register_agent", register_returns_false)
-    monkeypatch.setattr("brain_sdk.agent._build_callback_candidates", lambda *a, **k: [])
-    monkeypatch.setattr("brain_sdk.agent._resolve_callback_url", lambda url, port: "http://host:5000")
+    monkeypatch.setattr(
+        "brain_sdk.agent._build_callback_candidates", lambda *a, **k: []
+    )
+    monkeypatch.setattr(
+        "brain_sdk.agent._resolve_callback_url", lambda url, port: "http://host:5000"
+    )
     monkeypatch.setattr("brain_sdk.agent._is_running_in_container", lambda: False)
 
     brain = AgentBrain(agent)
@@ -191,9 +219,11 @@ def test_send_heartbeat(monkeypatch):
 
     def fake_post(url, headers=None, timeout=None):
         calls["url"] = url
+
         class Dummy:
             status_code = 200
             text = "ok"
+
         return Dummy()
 
     monkeypatch.setattr("requests.post", fake_post)
@@ -242,7 +272,9 @@ def test_start_and_stop_heartbeat(monkeypatch):
 async def test_enhanced_heartbeat_and_shutdown(monkeypatch):
     agent = StubAgent()
     agent.client = DummyBrainClient()
-    agent.mcp_handler = type("MCP", (), {"_get_mcp_server_health": lambda self: ["mcp"]})()
+    agent.mcp_handler = type(
+        "MCP", (), {"_get_mcp_server_health": lambda self: ["mcp"]}
+    )()
     agent.dev_mode = True
     brain = AgentBrain(agent)
 

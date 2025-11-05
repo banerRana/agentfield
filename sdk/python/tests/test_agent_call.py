@@ -1,4 +1,3 @@
-import asyncio
 from types import MethodType, SimpleNamespace
 
 import pytest
@@ -13,7 +12,9 @@ async def test_call_local_reasoner_argument_mapping():
     agent.node_id = "node"
     agent.brain_connected = True
     agent.dev_mode = False
-    agent.async_config = SimpleNamespace(enable_async_execution=False, fallback_to_sync=False)
+    agent.async_config = SimpleNamespace(
+        enable_async_execution=False, fallback_to_sync=False
+    )
     agent._async_execution_manager = None
     agent._current_execution_context = None
 
@@ -50,7 +51,9 @@ async def test_call_remote_target_uses_generic_arg_names():
     agent.node_id = "node"
     agent.brain_connected = True
     agent.dev_mode = False
-    agent.async_config = SimpleNamespace(enable_async_execution=False, fallback_to_sync=False)
+    agent.async_config = SimpleNamespace(
+        enable_async_execution=False, fallback_to_sync=False
+    )
     agent._async_execution_manager = None
     agent._current_execution_context = None
 
@@ -80,7 +83,9 @@ async def test_call_raises_when_brain_disconnected():
     agent.node_id = "node"
     agent.brain_connected = False
     agent.dev_mode = False
-    agent.async_config = SimpleNamespace(enable_async_execution=False, fallback_to_sync=False)
+    agent.async_config = SimpleNamespace(
+        enable_async_execution=False, fallback_to_sync=False
+    )
     agent._async_execution_manager = None
     agent._current_execution_context = None
     agent.client = SimpleNamespace()

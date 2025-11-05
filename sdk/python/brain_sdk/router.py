@@ -20,7 +20,9 @@ class AgentRouter:
 
     # ------------------------------------------------------------------
     # Registration helpers
-    def reasoner(self, path: Optional[str] = None, **kwargs: Any) -> Callable[[Callable], Callable]:
+    def reasoner(
+        self, path: Optional[str] = None, **kwargs: Any
+    ) -> Callable[[Callable], Callable]:
         """Store a reasoner definition for later registration on an Agent."""
 
         def decorator(func: Callable) -> Callable:

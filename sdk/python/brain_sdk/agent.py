@@ -3,14 +3,23 @@ import inspect
 import os
 import re
 import socket
-import subprocess
 import threading
 import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import wraps
-from typing import Any, Callable, List, Optional, Union, get_type_hints, Type, Dict, Literal
+from typing import (
+    Any,
+    Callable,
+    List,
+    Optional,
+    Union,
+    get_type_hints,
+    Type,
+    Dict,
+    Literal,
+)
 from brain_sdk.agent_ai import AgentAI
 from brain_sdk.agent_brain import AgentBrain
 from brain_sdk.agent_mcp import AgentMCP
@@ -19,8 +28,8 @@ from brain_sdk.agent_server import AgentServer
 from brain_sdk.agent_workflow import AgentWorkflow
 from brain_sdk.client import BrainClient
 from brain_sdk.dynamic_skills import DynamicMCPSkillManager
-from brain_sdk.execution_context import ExecutionContext, get_current_context, set_execution_context, reset_execution_context
-from brain_sdk.did_manager import DIDManager, DIDExecutionContext
+from brain_sdk.execution_context import ExecutionContext, get_current_context
+from brain_sdk.did_manager import DIDManager
 from brain_sdk.vc_generator import VCGenerator
 from brain_sdk.mcp_client import MCPClientRegistry
 from brain_sdk.mcp_manager import MCPManager
@@ -28,14 +37,13 @@ from brain_sdk.memory import MemoryClient, MemoryInterface
 from brain_sdk.memory_events import MemoryEventClient
 from brain_sdk.logger import log_debug, log_error, log_info, log_warn
 from brain_sdk.router import AgentRouter
-from brain_sdk.connection_manager import ConnectionManager, ConnectionConfig
+from brain_sdk.connection_manager import ConnectionManager
 from brain_sdk.types import AgentStatus, AIConfig, MemoryConfig
 from brain_sdk.multimodal_response import MultimodalResponse
 from brain_sdk.async_config import AsyncConfig
 from brain_sdk.async_execution_manager import AsyncExecutionManager
 from brain_sdk.pydantic_utils import convert_function_args, should_convert_args
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.routing import APIRoute
 from pydantic import create_model, BaseModel, ValidationError
 
 # Import aiohttp for fire-and-forget HTTP calls
@@ -59,12 +67,11 @@ def _detect_container_ip() -> Optional[str]:
         # Try AWS metadata service
         try:
             response = requests.get(
-                "http://169.254.169.254/latest/meta-data/public-ipv4",
-                timeout=2
+                "http://169.254.169.254/latest/meta-data/public-ipv4", timeout=2
             )
             if response.status_code == 200:
                 return response.text.strip()
-        except:
+        except Exception:
             pass
 
         # Try Google metadata service
@@ -72,11 +79,11 @@ def _detect_container_ip() -> Optional[str]:
             response = requests.get(
                 "http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip",
                 headers={"Metadata-Flavor": "Google"},
-                timeout=2
+                timeout=2,
             )
             if response.status_code == 200:
                 return response.text.strip()
-        except:
+        except Exception:
             pass
 
         # Try Azure metadata service
@@ -84,13 +91,14 @@ def _detect_container_ip() -> Optional[str]:
             response = requests.get(
                 "http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/publicIpAddress?api-version=2021-02-01",
                 headers={"Metadata": "true"},
-                timeout=2
+                timeout=2,
             )
             if response.status_code == 200:
                 import json
+
                 data = json.loads(response.text)
                 return data
-        except:
+        except Exception:
             pass
 
         # Fallback: try to get external IP via external service
@@ -98,7 +106,7 @@ def _detect_container_ip() -> Optional[str]:
             response = requests.get("https://api.ipify.org", timeout=5)
             if response.status_code == 200:
                 return response.text.strip()
-        except:
+        except Exception:
             pass
 
     except ImportError:
@@ -119,7 +127,7 @@ def _detect_local_ip() -> Optional[str]:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
-    except:
+    except Exception:
         return None
 
 
@@ -139,9 +147,13 @@ def _is_running_in_container() -> bool:
         try:
             with open("/proc/1/cgroup", "r") as f:
                 content = f.read()
-                if "docker" in content or "containerd" in content or "kubepods" in content:
+                if (
+                    "docker" in content
+                    or "containerd" in content
+                    or "kubepods" in content
+                ):
                     return True
-        except:
+        except Exception:
             pass
 
         # Check for Kubernetes environment variables
@@ -153,7 +165,7 @@ def _is_running_in_container() -> bool:
         if any(var in os.environ for var in container_vars):
             return True
 
-    except:
+    except Exception:
         pass
 
     return False
@@ -346,6 +358,7 @@ class Agent(FastAPI):
         """
         # Set logging level based on dev_mode
         from brain_sdk.logger import set_log_level
+
         set_log_level("DEBUG" if dev_mode else "INFO")
 
         """
@@ -419,7 +432,9 @@ class Agent(FastAPI):
         self._heartbeat_stop_event = threading.Event()
         self.dev_mode = dev_mode
         self.brain_connected = False
-        self.auto_register = auto_register  # Auto-register on first invocation (serverless mode)
+        self.auto_register = (
+            auto_register  # Auto-register on first invocation (serverless mode)
+        )
 
         # 🔥 FIX: Resolve callback URL immediately if provided
         # This ensures base_url is available before serve() is called
@@ -446,9 +461,7 @@ class Agent(FastAPI):
         self._start_time = time.time()  # Track start time for uptime calculation
 
         # Initialize AI and Memory configurations
-        self.ai_config = (
-            ai_config if ai_config else AIConfig.from_env()
-        )
+        self.ai_config = ai_config if ai_config else AIConfig.from_env()
         self.memory_config = (
             memory_config
             if memory_config
@@ -572,10 +585,10 @@ class Agent(FastAPI):
         import asyncio
 
         # Check if this is a discovery request
-        path = event.get('path', '')
-        action = event.get('action', '')
+        path = event.get("path", "")
+        action = event.get("action", "")
 
-        if path == '/discover' or action == 'discover':
+        if path == "/discover" or action == "discover":
             # Return agent metadata for Brain server registration
             return self._handle_discovery()
 
@@ -597,16 +610,20 @@ class Agent(FastAPI):
         if not reasoner_name:
             return {
                 "statusCode": 400,
-                "body": {"error": "Missing 'reasoner' or 'target' in event"}
+                "body": {"error": "Missing 'reasoner' or 'target' in event"},
             }
 
         # Create execution context
         execution_context = ExecutionContext(
-            execution_id=execution_context_data.get("execution_id", f"exec_{int(time.time() * 1000)}"),
-            workflow_id=execution_context_data.get("workflow_id", f"wf_{int(time.time() * 1000)}"),
+            execution_id=execution_context_data.get(
+                "execution_id", f"exec_{int(time.time() * 1000)}"
+            ),
+            workflow_id=execution_context_data.get(
+                "workflow_id", f"wf_{int(time.time() * 1000)}"
+            ),
             agent_node_id=self.node_id,
             reasoner_name=reasoner_name,
-            parent_execution_id=execution_context_data.get("parent_execution_id")
+            parent_execution_id=execution_context_data.get("parent_execution_id"),
         )
 
         # Set execution context
@@ -625,19 +642,16 @@ class Agent(FastAPI):
 
                 return {
                     "statusCode": 200,
-                    "body": {"result": result, "status": "success"}
+                    "body": {"result": result, "status": "success"},
                 }
             else:
                 return {
                     "statusCode": 404,
-                    "body": {"error": f"Function '{reasoner_name}' not found"}
+                    "body": {"error": f"Function '{reasoner_name}' not found"},
                 }
 
         except Exception as e:
-            return {
-                "statusCode": 500,
-                "body": {"error": str(e), "status": "error"}
-            }
+            return {"statusCode": 500, "body": {"error": str(e), "status": "error"}}
         finally:
             # Clean up execution context
             self._current_execution_context = None
@@ -818,7 +832,9 @@ class Agent(FastAPI):
             )
         return MemoryInterface(memory_client, self.memory_event_client)
 
-    def _populate_execution_context_with_did(self, execution_context, did_execution_context):
+    def _populate_execution_context_with_did(
+        self, execution_context, did_execution_context
+    ):
         """
         Populate the execution context with DID information.
 
@@ -832,7 +848,17 @@ class Agent(FastAPI):
             execution_context.target_did = did_execution_context.target_did
             execution_context.agent_node_did = did_execution_context.agent_node_did
 
-    async def _generate_vc_async(self, vc_generator, did_execution_context, function_name, input_data, output_data, status="success", error_message=None, duration_ms=0):
+    async def _generate_vc_async(
+        self,
+        vc_generator,
+        did_execution_context,
+        function_name,
+        input_data,
+        output_data,
+        status="success",
+        error_message=None,
+        duration_ms=0,
+    ):
         """
         Generate VC asynchronously without blocking execution.
 
@@ -854,7 +880,7 @@ class Agent(FastAPI):
                     output_data=output_data,
                     status=status,
                     error_message=error_message,
-                    duration_ms=duration_ms
+                    duration_ms=duration_ms,
                 )
                 if vc and self.dev_mode:
                     log_debug(f"Generated VC {vc.vc_id} for {function_name}")
@@ -884,7 +910,9 @@ class Agent(FastAPI):
         if not payload:
             return
 
-        discovery_section = payload.get("callback_discovery") if isinstance(payload, dict) else None
+        discovery_section = (
+            payload.get("callback_discovery") if isinstance(payload, dict) else None
+        )
 
         resolved = None
         if isinstance(payload, dict):
@@ -933,23 +961,26 @@ class Agent(FastAPI):
             return False
 
         try:
-
             # Prepare reasoner and skill definitions for DID registration
             reasoner_defs = []
             for reasoner in self.reasoners:
-                reasoner_defs.append({
-                    "id": reasoner["id"],
-                    "input_schema": reasoner["input_schema"],
-                    "output_schema": reasoner["output_schema"]
-                })
+                reasoner_defs.append(
+                    {
+                        "id": reasoner["id"],
+                        "input_schema": reasoner["input_schema"],
+                        "output_schema": reasoner["output_schema"],
+                    }
+                )
 
             skill_defs = []
             for skill in self.skills:
-                skill_defs.append({
-                    "id": skill["id"],
-                    "input_schema": skill["input_schema"],
-                    "tags": skill.get("tags", [])
-                })
+                skill_defs.append(
+                    {
+                        "id": skill["id"],
+                        "input_schema": skill["input_schema"],
+                        "tags": skill.get("tags", []),
+                    }
+                )
 
             log_debug(
                 "Calling did_manager.register_agent() with "
@@ -1036,7 +1067,10 @@ class Agent(FastAPI):
             async def endpoint(input_data: InputSchema, request: Request):
                 import asyncio
                 import time
-                from brain_sdk.execution_context import set_execution_context, reset_execution_context
+                from brain_sdk.execution_context import (
+                    set_execution_context,
+                    reset_execution_context,
+                )
 
                 # Extract execution context from request headers
                 execution_context = ExecutionContext.from_request(request, self.node_id)
@@ -1051,7 +1085,7 @@ class Agent(FastAPI):
 
                 # 🔥 NEW: Send workflow update for parent execution context
                 # This ensures the parent node appears in the workflow DAG
-                if hasattr(self, 'workflow_handler') and self.workflow_handler:
+                if hasattr(self, "workflow_handler") and self.workflow_handler:
                     # Update reasoner name in context
                     execution_context.reasoner_name = reasoner_id
 
@@ -1074,10 +1108,12 @@ class Agent(FastAPI):
                         execution_context.workflow_id,
                         execution_context.workflow_id,  # Use workflow_id as session_id for now
                         "agent",  # caller function
-                        reasoner_id  # target function
+                        reasoner_id,  # target function
                     )
                     # Populate execution context with DID information
-                    self._populate_execution_context_with_did(execution_context, did_execution_context)
+                    self._populate_execution_context_with_did(
+                        execution_context, did_execution_context
+                    )
 
                 try:
                     # 🔥 NEW: Convert input to function arguments with automatic Pydantic model conversion
@@ -1085,7 +1121,9 @@ class Agent(FastAPI):
                     try:
                         if should_convert_args(func):
                             # Use our conversion utility to convert dict arguments to Pydantic models
-                            converted_args, converted_kwargs = convert_function_args(func, (), payload_dict)
+                            converted_args, converted_kwargs = convert_function_args(
+                                func, (), payload_dict
+                            )
                             args = converted_args
                             kwargs = converted_kwargs
                         else:
@@ -1096,12 +1134,14 @@ class Agent(FastAPI):
                         # Re-raise validation errors with context
                         raise ValidationError(
                             f"Pydantic validation failed for reasoner '{reasoner_id}': {e}",
-                            model=getattr(e, 'model', None)
+                            model=getattr(e, "model", None),
                         ) from e
                     except Exception as e:
                         # Log conversion errors but continue with original args for backward compatibility
                         if self.dev_mode:
-                            log_debug(f"⚠️ Warning: Failed to convert arguments for {reasoner_id}: {e}")
+                            log_debug(
+                                f"⚠️ Warning: Failed to convert arguments for {reasoner_id}: {e}"
+                            )
                         args = ()
                         kwargs = payload_dict
 
@@ -1118,7 +1158,9 @@ class Agent(FastAPI):
                     # Generate VC asynchronously if DID is enabled
                     if self.did_enabled and self.vc_generator and did_execution_context:
                         if self.dev_mode:
-                            log_debug(f"Triggering VC generation for execution: {did_execution_context.execution_id}")
+                            log_debug(
+                                f"Triggering VC generation for execution: {did_execution_context.execution_id}"
+                            )
                         end_time = time.time()
                         duration_ms = int((end_time - start_time) * 1000)
                         asyncio.create_task(
@@ -1130,12 +1172,12 @@ class Agent(FastAPI):
                                 result,
                                 "success",
                                 None,
-                                duration_ms
+                                duration_ms,
                             )
                         )
 
                     # 🔥 NEW: Send completion notification for parent execution
-                    if hasattr(self, 'workflow_handler') and self.workflow_handler:
+                    if hasattr(self, "workflow_handler") and self.workflow_handler:
                         end_time = time.time()
                         await self.workflow_handler.notify_call_complete(
                             execution_context.execution_id,
@@ -1149,7 +1191,7 @@ class Agent(FastAPI):
 
                     return result
                 except asyncio.CancelledError as cancel_err:
-                    if hasattr(self, 'workflow_handler') and self.workflow_handler:
+                    if hasattr(self, "workflow_handler") and self.workflow_handler:
                         end_time = time.time()
                         await self.workflow_handler.notify_call_error(
                             execution_context.execution_id,
@@ -1162,7 +1204,7 @@ class Agent(FastAPI):
                         )
                     raise cancel_err
                 except HTTPException as http_exc:
-                    if hasattr(self, 'workflow_handler') and self.workflow_handler:
+                    if hasattr(self, "workflow_handler") and self.workflow_handler:
                         end_time = time.time()
                         detail = getattr(http_exc, "detail", None) or str(http_exc)
                         await self.workflow_handler.notify_call_error(
@@ -1177,7 +1219,7 @@ class Agent(FastAPI):
                     raise
                 except Exception as e:
                     # 🔥 NEW: Send error notification for parent execution
-                    if hasattr(self, 'workflow_handler') and self.workflow_handler:
+                    if hasattr(self, "workflow_handler") and self.workflow_handler:
                         end_time = time.time()
                         await self.workflow_handler.notify_call_error(
                             execution_context.execution_id,
@@ -1192,7 +1234,7 @@ class Agent(FastAPI):
                 finally:
                     # 🔥 CRITICAL: Clean up both contexts
                     reset_execution_context(context_token)  # Thread-local cleanup
-                    self._current_execution_context = None   # Agent-level cleanup
+                    self._current_execution_context = None  # Agent-level cleanup
                     # Clear current agent after execution
                     self._clear_current()
 
@@ -1211,6 +1253,7 @@ class Agent(FastAPI):
                     # We're in a context managed by the enhanced decorator system
                     # Use the enhanced decorator's tracking mechanism
                     from brain_sdk.decorators import _execute_with_tracking
+
                     return await _execute_with_tracking(original_func, *args, **kwargs)
                 else:
                     # 🔥 FIX: Always use the agent's workflow handler for tracking
@@ -1220,8 +1263,8 @@ class Agent(FastAPI):
                     )
 
             # 🔥 FIX: Store reference to original function for FastAPI endpoint access
-            setattr(tracked_func, '_original_func', original_func)
-            setattr(tracked_func, '_is_tracked_replacement', True)
+            setattr(tracked_func, "_original_func", original_func)
+            setattr(tracked_func, "_is_tracked_replacement", True)
 
             # Register reasoner metadata
             output_schema = {}
@@ -1469,10 +1512,12 @@ class Agent(FastAPI):
                         execution_context.workflow_id,
                         execution_context.workflow_id,  # Use workflow_id as session_id for now
                         "agent",  # caller function
-                        skill_id  # target function
+                        skill_id,  # target function
                     )
                     # Populate execution context with DID information
-                    self._populate_execution_context_with_did(execution_context, did_execution_context)
+                    self._populate_execution_context_with_did(
+                        execution_context, did_execution_context
+                    )
 
                 # Convert input to function arguments
                 kwargs = input_data.model_dump()
@@ -1486,7 +1531,7 @@ class Agent(FastAPI):
 
                 # 🔥 FIX: Call the original function directly to prevent double tracking
                 # The FastAPI endpoint already handles tracking, so we don't want the tracked wrapper
-                original_func = getattr(func, '_original_func', func)
+                original_func = getattr(func, "_original_func", func)
                 if asyncio.iscoroutinefunction(original_func):
                     result = await original_func(**kwargs)
                 else:
@@ -1505,7 +1550,7 @@ class Agent(FastAPI):
                             result,
                             "success",
                             None,
-                            duration_ms
+                            duration_ms,
                         )
                     )
 
@@ -1707,15 +1752,23 @@ class Agent(FastAPI):
             response_format=response_format,
             context=context,
             memory_scope=memory_scope,
-            **kwargs
+            **kwargs,
         )
 
     def _ensure_call_semaphore(self) -> asyncio.Semaphore:
-        if self._call_semaphore is None:
-            with self._call_semaphore_guard:
-                if self._call_semaphore is None:
-                    self._call_semaphore = asyncio.Semaphore(self._max_concurrent_calls)
-        return self._call_semaphore
+        semaphore = getattr(self, "_call_semaphore", None)
+        if semaphore is None:
+            guard = getattr(self, "_call_semaphore_guard", None)
+            if guard is None:
+                guard = threading.Lock()
+                setattr(self, "_call_semaphore_guard", guard)
+            max_calls = max(1, getattr(self, "_max_concurrent_calls", 1))
+            with guard:
+                semaphore = getattr(self, "_call_semaphore", None)
+                if semaphore is None:
+                    semaphore = asyncio.Semaphore(max_calls)
+                    setattr(self, "_call_semaphore", semaphore)
+        return semaphore
 
     @asynccontextmanager
     async def _limit_outbound_calls(self):
@@ -1733,7 +1786,7 @@ class Agent(FastAPI):
         format: Optional[str] = None,
         model: Optional[str] = None,
         mode: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> "MultimodalResponse":
         """
         AI interface optimized for audio generation.
@@ -1772,19 +1825,15 @@ class Agent(FastAPI):
         # Only pass parameters that are not None
         audio_kwargs = {}
         if voice is not None:
-            audio_kwargs['voice'] = voice
+            audio_kwargs["voice"] = voice
         if format is not None:
-            audio_kwargs['format'] = format
+            audio_kwargs["format"] = format
         if model is not None:
-            audio_kwargs['model'] = model
+            audio_kwargs["model"] = model
         if mode is not None:
-            audio_kwargs['mode'] = mode
+            audio_kwargs["mode"] = mode
 
-        return await self.ai_handler.ai_with_audio(
-            *args,
-            **audio_kwargs,
-            **kwargs
-        )
+        return await self.ai_handler.ai_with_audio(*args, **audio_kwargs, **kwargs)
 
     async def ai_with_vision(  # pragma: no cover - relies on external vision services
         self,
@@ -1793,7 +1842,7 @@ class Agent(FastAPI):
         quality: Optional[str] = None,
         style: Optional[str] = None,
         model: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> "MultimodalResponse":
         """
         AI interface optimized for image generation and vision tasks.
@@ -1831,19 +1880,15 @@ class Agent(FastAPI):
         # Only pass parameters that are not None
         vision_kwargs = {}
         if size is not None:
-            vision_kwargs['size'] = size
+            vision_kwargs["size"] = size
         if quality is not None:
-            vision_kwargs['quality'] = quality
+            vision_kwargs["quality"] = quality
         if style is not None:
-            vision_kwargs['style'] = style
+            vision_kwargs["style"] = style
         if model is not None:
-            vision_kwargs['model'] = model
+            vision_kwargs["model"] = model
 
-        return await self.ai_handler.ai_with_vision(
-            *args,
-            **vision_kwargs,
-            **kwargs
-        )
+        return await self.ai_handler.ai_with_vision(*args, **vision_kwargs, **kwargs)
 
     async def ai_with_multimodal(  # pragma: no cover - relies on external multimodal services
         self,
@@ -1852,7 +1897,7 @@ class Agent(FastAPI):
         audio_config: Optional[Dict] = None,
         image_config: Optional[Dict] = None,
         model: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> "MultimodalResponse":
         """
         AI interface with explicit multimodal control.
@@ -1894,7 +1939,7 @@ class Agent(FastAPI):
             audio_config=audio_config,
             image_config=image_config,
             model=model,
-            **kwargs
+            **kwargs,
         )
 
     async def call(self, target: str, *args, **kwargs) -> dict:
@@ -2007,10 +2052,15 @@ class Agent(FastAPI):
         if self.dev_mode:
             from brain_sdk.execution_context import get_current_context
             from brain_sdk.logger import log_debug
+
             log_debug(f"🔍 CALL_DEBUG: Making cross-agent call to {target}")
             log_debug(f"  Current execution_id: {current_context.execution_id}")
-            log_debug(f"  Thread-local context exists: {get_current_context() is not None}")
-            log_debug(f"  Agent-level context exists: {self._current_execution_context is not None}")
+            log_debug(
+                f"  Thread-local context exists: {get_current_context() is not None}"
+            )
+            log_debug(
+                f"  Agent-level context exists: {self._current_execution_context is not None}"
+            )
 
         # Prepare headers with proper workflow tracking
         headers = current_context.to_headers()
@@ -2025,8 +2075,13 @@ class Agent(FastAPI):
         # Check if Brain server is available for cross-agent calls
         if not self.brain_connected:
             from brain_sdk.logger import log_warn
-            log_warn(f"Brain server unavailable - cannot make cross-agent call to {target}")
-            raise Exception(f"Cross-agent call to {target} failed: Brain server unavailable. Agent is running in local mode.")
+
+            log_warn(
+                f"Brain server unavailable - cannot make cross-agent call to {target}"
+            )
+            raise Exception(
+                f"Cross-agent call to {target} failed: Brain server unavailable. Agent is running in local mode."
+            )
 
         # Use the enhanced BrainClient to make the call via execution gateway
         try:
@@ -2036,27 +2091,34 @@ class Agent(FastAPI):
                 for key, value in final_kwargs.items():
                     try:
                         import json
+
                         json.dumps(value, default=str)  # Test serialization
                     except (TypeError, ValueError) as se:
-                        serialization_issues.append(f"{key}: {type(value).__name__} - {str(se)}")
+                        serialization_issues.append(
+                            f"{key}: {type(value).__name__} - {str(se)}"
+                        )
 
                         # Try to convert common non-serializable types
-                        if hasattr(value, 'value'):  # Enum with .value attribute
+                        if hasattr(value, "value"):  # Enum with .value attribute
                             final_kwargs[key] = value.value
-                        elif hasattr(value, '__dict__'):  # Object with attributes
+                        elif hasattr(value, "__dict__"):  # Object with attributes
                             final_kwargs[key] = value.__dict__
                         else:
                             final_kwargs[key] = str(value)
 
                 if serialization_issues and self.dev_mode:
-                    log_debug(f"Converted {len(serialization_issues)} non-serializable parameters")
+                    log_debug(
+                        f"Converted {len(serialization_issues)} non-serializable parameters"
+                    )
 
                 import asyncio
                 import time
 
                 # Determine how long we're willing to wait for long-running executions.
                 max_timeout = getattr(self.async_config, "max_execution_timeout", None)
-                default_timeout = getattr(self.async_config, "default_execution_timeout", None)
+                default_timeout = getattr(
+                    self.async_config, "default_execution_timeout", None
+                )
                 execution_timeout = max_timeout or default_timeout or 600.0
                 # Guard against misconfiguration resulting in non-positive values.
                 if execution_timeout <= 0:
@@ -2066,8 +2128,7 @@ class Agent(FastAPI):
 
                 # Check if async execution is enabled and available
                 use_async_execution = (
-                    self.async_config.enable_async_execution and
-                    self.brain_connected
+                    self.async_config.enable_async_execution and self.brain_connected
                 )
 
                 if use_async_execution:
@@ -2126,7 +2187,9 @@ class Agent(FastAPI):
                     return result
                 except Exception as exec_error:
                     if self.dev_mode:
-                        log_debug(f"Client execute failed: {type(exec_error).__name__}: {str(exec_error)}")
+                        log_debug(
+                            f"Client execute failed: {type(exec_error).__name__}: {str(exec_error)}"
+                        )
                     raise
 
             # Add a timeout to prevent infinite hangs using configured allowance for long workflows
@@ -2136,7 +2199,9 @@ class Agent(FastAPI):
                 )
                 elapsed_time = time.time() - start_time
                 if self.dev_mode:
-                    log_debug(f"Sync execute call completed in {elapsed_time:.2f} seconds")
+                    log_debug(
+                        f"Sync execute call completed in {elapsed_time:.2f} seconds"
+                    )
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time
                 log_debug(
@@ -2157,7 +2222,9 @@ class Agent(FastAPI):
 
         except Exception as e:
             if self.dev_mode:
-                log_debug(f"Cross-agent call failed: {target} - {type(e).__name__}: {str(e)}")
+                log_debug(
+                    f"Cross-agent call failed: {target} - {type(e).__name__}: {str(e)}"
+                )
             raise
 
     async def _get_async_execution_manager(self) -> AsyncExecutionManager:
@@ -2170,8 +2237,7 @@ class Agent(FastAPI):
         if self._async_execution_manager is None:
             # Create async execution manager with the same base URL as the client
             self._async_execution_manager = AsyncExecutionManager(
-                base_url=self.brain_server,
-                config=self.async_config
+                base_url=self.brain_server, config=self.async_config
             )
             # Start the manager
             await self._async_execution_manager.start()
@@ -2257,12 +2323,13 @@ class Agent(FastAPI):
                     "message": message,
                     "tags": tags,
                     "timestamp": time.time(),
-                    "agent_node_id": self.node_id
+                    "agent_node_id": self.node_id,
                 }
 
                 # Make async HTTP request to backend - use UI API endpoint to match frontend
                 try:
                     import aiohttp
+
                     timeout = aiohttp.ClientTimeout(total=5.0)  # 5 second timeout
                     # Use UI API base URL to match where frontend fetches notes from
                     # Replace the last occurrence of /api/v1 with /api/ui/v1
@@ -2270,9 +2337,14 @@ class Agent(FastAPI):
 
                     if self.dev_mode:
                         from brain_sdk.logger import log_debug
-                        log_debug(f"NOTE DEBUG: Original api_base: {self.client.api_base}")
+
+                        log_debug(
+                            f"NOTE DEBUG: Original api_base: {self.client.api_base}"
+                        )
                         log_debug(f"NOTE DEBUG: UI api_base: {ui_api_base}")
-                        log_debug(f"NOTE DEBUG: Full URL: {ui_api_base}/executions/note")
+                        log_debug(
+                            f"NOTE DEBUG: Full URL: {ui_api_base}/executions/note"
+                        )
                         log_debug(f"NOTE DEBUG: Payload: {payload}")
                         log_debug(f"NOTE DEBUG: Headers: {headers}")
 
@@ -2280,53 +2352,81 @@ class Agent(FastAPI):
                         async with session.post(
                             f"{ui_api_base}/executions/note",
                             json=payload,
-                            headers=headers
+                            headers=headers,
                         ) as response:
                             if self.dev_mode:
                                 from brain_sdk.logger import log_debug
+
                                 response_text = await response.text()
-                                log_debug(f"NOTE DEBUG: Response status: {response.status}")
+                                log_debug(
+                                    f"NOTE DEBUG: Response status: {response.status}"
+                                )
                                 log_debug(f"NOTE DEBUG: Response text: {response_text}")
                                 if response.status == 200:
-                                    log_debug(f"✅ Note successfully sent to {ui_api_base}/executions/note")
+                                    log_debug(
+                                        f"✅ Note successfully sent to {ui_api_base}/executions/note"
+                                    )
                                 else:
-                                    log_debug(f"❌ Note failed with status {response.status}: {response_text}")
+                                    log_debug(
+                                        f"❌ Note failed with status {response.status}: {response_text}"
+                                    )
                 except ImportError:
                     # Fallback to requests if aiohttp not available
                     import requests
+
                     try:
                         # Use UI API base URL to match where frontend fetches notes from
-                        ui_api_base = self.client.api_base.replace("/api/v1", "/api/ui/v1")
+                        ui_api_base = self.client.api_base.replace(
+                            "/api/v1", "/api/ui/v1"
+                        )
 
                         if self.dev_mode:
                             from brain_sdk.logger import log_debug
-                            log_debug(f"NOTE DEBUG (requests): Original api_base: {self.client.api_base}")
-                            log_debug(f"NOTE DEBUG (requests): UI api_base: {ui_api_base}")
-                            log_debug(f"NOTE DEBUG (requests): Full URL: {ui_api_base}/executions/note")
+
+                            log_debug(
+                                f"NOTE DEBUG (requests): Original api_base: {self.client.api_base}"
+                            )
+                            log_debug(
+                                f"NOTE DEBUG (requests): UI api_base: {ui_api_base}"
+                            )
+                            log_debug(
+                                f"NOTE DEBUG (requests): Full URL: {ui_api_base}/executions/note"
+                            )
 
                         response = requests.post(
                             f"{ui_api_base}/executions/note",
                             json=payload,
                             headers=headers,
-                            timeout=5.0
+                            timeout=5.0,
                         )
                         if self.dev_mode:
                             from brain_sdk.logger import log_debug
-                            log_debug(f"NOTE DEBUG (requests): Response status: {response.status_code}")
-                            log_debug(f"NOTE DEBUG (requests): Response text: {response.text}")
+
+                            log_debug(
+                                f"NOTE DEBUG (requests): Response status: {response.status_code}"
+                            )
+                            log_debug(
+                                f"NOTE DEBUG (requests): Response text: {response.text}"
+                            )
                             if response.status_code == 200:
-                                log_debug(f"✅ Note successfully sent to {ui_api_base}/executions/note")
+                                log_debug(
+                                    f"✅ Note successfully sent to {ui_api_base}/executions/note"
+                                )
                             else:
-                                log_debug(f"❌ Note failed with status {response.status_code}: {response.text}")
+                                log_debug(
+                                    f"❌ Note failed with status {response.status_code}: {response.text}"
+                                )
                     except Exception as e:
                         if self.dev_mode:
                             from brain_sdk.logger import log_debug
+
                             log_debug(f"Note request failed: {type(e).__name__}: {e}")
 
             except Exception as e:
                 # Silently handle errors to avoid interrupting main workflow
                 if self.dev_mode:
                     from brain_sdk.logger import log_debug
+
                     log_debug(f"Failed to send note: {type(e).__name__}: {e}")
 
         # Create task without awaiting (fire-and-forget)
@@ -2339,12 +2439,14 @@ class Agent(FastAPI):
             else:
                 # If no loop is running, run in a new thread
                 import threading
+
                 thread = threading.Thread(target=lambda: asyncio.run(_send_note()))
                 thread.daemon = True
                 thread.start()
         except RuntimeError:
             # No event loop available, run in a new thread
             import threading
+
             thread = threading.Thread(target=lambda: asyncio.run(_send_note()))
             thread.daemon = True
             thread.start()
@@ -2361,6 +2463,7 @@ class Agent(FastAPI):
         """
         # Check thread-local context first (most reliable)
         from brain_sdk.execution_context import get_current_context
+
         thread_local_context = get_current_context()
 
         if thread_local_context:
@@ -2423,10 +2526,11 @@ class Agent(FastAPI):
             from pydantic import BaseModel
 
             # If return_type is a Pydantic model, convert the dict to the model
-            if (isinstance(return_type, type) and
-                issubclass(return_type, BaseModel) and
-                isinstance(response_data, dict)):
-
+            if (
+                isinstance(return_type, type)
+                and issubclass(return_type, BaseModel)
+                and isinstance(response_data, dict)
+            ):
                 return return_type(**response_data)
 
             # If it's not a Pydantic model or not a dict, return as-is
@@ -2467,11 +2571,15 @@ class Agent(FastAPI):
         # Also clear from thread-local storage
         clear_current_agent()
 
-    def _setup_signal_handlers(self) -> None:  # pragma: no cover - requires signal integration
+    def _setup_signal_handlers(
+        self,
+    ) -> None:  # pragma: no cover - requires signal integration
         """Delegate to server handler for signal setup"""
         return self.server_handler.setup_signal_handlers()
 
-    def _signal_handler(self, signum: int, frame) -> None:  # pragma: no cover - runtime signal handling
+    def _signal_handler(
+        self, signum: int, frame
+    ) -> None:  # pragma: no cover - runtime signal handling
         """Delegate to server handler for signal handling"""
         return self.server_handler.signal_handler(signum, frame)
 
@@ -2483,10 +2591,14 @@ class Agent(FastAPI):
         """
         try:
             # Cleanup async execution manager if it exists
-            if hasattr(self, "_async_execution_manager") and self._async_execution_manager:
+            if (
+                hasattr(self, "_async_execution_manager")
+                and self._async_execution_manager
+            ):
                 try:
                     # Try to cleanup async resources in a new event loop
                     import asyncio
+
                     asyncio.run(self._cleanup_async_resources())
                 except Exception:
                     # Ignore async cleanup errors in destructor

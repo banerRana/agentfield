@@ -769,7 +769,10 @@ func (h *ExecutionHandler) loadPayloadData(ctx context.Context, uri string) (int
 	return decodePayload(payloadBytes), len(payloadBytes), nil
 }
 
-const largePayloadWarningThreshold = 5 * 1024 * 1024 // 5 MiB
+const (
+	largePayloadWarningThreshold = 5 * 1024 * 1024 // 5 MiB
+	corruptedJSONSentinel        = "corrupted_json_data"
+)
 
 func decodePayload(raw []byte) interface{} {
 	trimmed := bytes.TrimSpace(raw)
@@ -788,13 +791,25 @@ func hasMeaningfulData(data interface{}) bool {
 	case nil:
 		return false
 	case string:
-		return strings.TrimSpace(v) != ""
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return false
+		}
+		return !strings.EqualFold(trimmed, corruptedJSONSentinel)
 	case []byte:
 		return len(v) > 0
 	case []interface{}:
 		return len(v) > 0
 	case map[string]interface{}:
-		return len(v) > 0
+		if len(v) == 0 {
+			return false
+		}
+		if errValue, ok := v["error"]; ok {
+			if errStr, ok := errValue.(string); ok && strings.EqualFold(errStr, corruptedJSONSentinel) {
+				return false
+			}
+		}
+		return true
 	default:
 		return true
 	}

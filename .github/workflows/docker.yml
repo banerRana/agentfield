@@ -34,3 +34,18 @@ jobs:
 
       - name: Smoke test control plane image
         run: docker run --rm brain-control-plane:test --help
+
+  # Summary job that depends on all critical checks
+  required-checks:
+    name: All Required Checks Passed
+    runs-on: ubuntu-latest
+    needs: [control-plane-image]
+    if: always()
+    steps:
+      - name: Check all jobs
+        run: |
+          if [ "${{ needs.control-plane-image.result }}" != "success" ]; then
+            echo "Required checks failed"
+            exit 1
+          fi
+          echo "All required checks passed successfully"

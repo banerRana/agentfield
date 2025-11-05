@@ -14,9 +14,7 @@ def make_agent_app():
     app.version = "1.0.0"
     app.reasoners = [{"id": "reasoner_a"}]
     app.skills = [{"id": "skill_b"}]
-    app.client = SimpleNamespace(
-        notify_graceful_shutdown_sync=lambda node_id: True
-    )
+    app.client = SimpleNamespace(notify_graceful_shutdown_sync=lambda node_id: True)
     app.mcp_manager = type(
         "MCPManager",
         (),
@@ -41,7 +39,9 @@ async def test_setup_brain_routes_health_endpoint():
     server = AgentServer(app)
     server.setup_brain_routes()
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.get("/health")
 
     assert resp.status_code == 200
@@ -49,7 +49,9 @@ async def test_setup_brain_routes_health_endpoint():
     assert data["node_id"] == "agent-1"
     assert data["mcp_servers"]["running"] == 1
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp_reasoners = await client.get("/reasoners")
         resp_skills = await client.get("/skills")
 
@@ -64,7 +66,9 @@ async def test_shutdown_endpoint_triggers_flags():
     server = AgentServer(app)
     server.setup_brain_routes()
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post(
             "/shutdown",
             json={"graceful": True, "timeout_seconds": 5},
@@ -97,7 +101,9 @@ async def test_status_endpoint_reports_psutil(monkeypatch):
 
     server.setup_brain_routes()
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.get("/status")
 
     data = resp.json()
@@ -119,7 +125,9 @@ async def test_shutdown_immediate_path(monkeypatch):
 
     monkeypatch.setattr(AgentServer, "_immediate_shutdown", fake_immediate)
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/shutdown", json={"graceful": False})
 
     assert resp.status_code == 200
@@ -156,7 +164,9 @@ async def test_mcp_start_stop_routes(monkeypatch):
     server = AgentServer(app)
     server.setup_brain_routes()
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         start = await client.post("/mcp/foo/start")
         stop = await client.post("/mcp/foo/stop")
         restart = await client.post("/mcp/foo/restart")

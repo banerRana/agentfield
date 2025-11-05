@@ -1,5 +1,9 @@
-import time
-from brain_sdk.types import ExecutionHeaders, AgentStatus, HeartbeatData, MCPServerHealth
+from brain_sdk.types import (
+    ExecutionHeaders,
+    AgentStatus,
+    HeartbeatData,
+    MCPServerHealth,
+)
 
 
 def test_execution_headers_minimal():

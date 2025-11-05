@@ -3,7 +3,6 @@ from brain_sdk.execution_state import (
     ExecutionBatch,
     ExecutionState,
     ExecutionStatus,
-    ExecutionPriority,
 )
 
 

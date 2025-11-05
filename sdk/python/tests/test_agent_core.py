@@ -6,7 +6,11 @@ import pytest
 
 from brain_sdk.agent import Agent
 from brain_sdk.agent_registry import get_current_agent_instance
-from brain_sdk.execution_context import ExecutionContext, set_execution_context, reset_execution_context
+from brain_sdk.execution_context import (
+    ExecutionContext,
+    set_execution_context,
+    reset_execution_context,
+)
 
 
 def make_agent_stub():
@@ -14,7 +18,9 @@ def make_agent_stub():
     agent.node_id = "node"
     agent.brain_server = "http://brain"
     agent.dev_mode = False
-    agent.async_config = SimpleNamespace(enable_async_execution=True, fallback_to_sync=True)
+    agent.async_config = SimpleNamespace(
+        enable_async_execution=True, fallback_to_sync=True
+    )
     agent._async_execution_manager = None
     agent._current_execution_context = None
     agent.client = SimpleNamespace(api_base="http://brain/api/v1")
@@ -111,7 +117,9 @@ async def test_note_sends_async_request(monkeypatch):
 
             return DummyResponse()
 
-    stub_aiohttp = SimpleNamespace(ClientTimeout=DummyTimeout, ClientSession=DummySession)
+    stub_aiohttp = SimpleNamespace(
+        ClientTimeout=DummyTimeout, ClientSession=DummySession
+    )
     monkeypatch.setitem(sys.modules, "aiohttp", stub_aiohttp)
     monkeypatch.setattr("brain_sdk.agent.aiohttp", stub_aiohttp)
 

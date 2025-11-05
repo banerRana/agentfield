@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import random
 
 import pytest
@@ -14,7 +13,11 @@ class DummyHTTPError(Exception):
     def __init__(self, message: str = "rate limited", retry_after: float | None = None):
         super().__init__(message)
         self.retry_after = retry_after
-        self.response = type("Resp", (), {"status_code": self.status_code, "headers": {"Retry-After": retry_after}})()
+        self.response = type(
+            "Resp",
+            (),
+            {"status_code": self.status_code, "headers": {"Retry-After": retry_after}},
+        )()
 
 
 @pytest.mark.unit

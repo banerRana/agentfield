@@ -5,7 +5,12 @@ import httpx
 import pytest
 import requests
 
-from brain_sdk.memory import GlobalMemoryClient, MemoryClient, MemoryInterface, ScopedMemoryClient
+from brain_sdk.memory import (
+    GlobalMemoryClient,
+    MemoryClient,
+    MemoryInterface,
+    ScopedMemoryClient,
+)
 
 
 class DummySyncResponse:
@@ -52,26 +57,31 @@ async def test_memory_round_trip(monkeypatch, dummy_headers):
             data = store.get(scope, {}).get(json["key"])
             if data is None:
                 return DummyAsyncResponse(404, {})
-            payload = {"data": json_module.dumps(data) if not isinstance(data, (dict, list)) else data}
+            payload = {
+                "data": json_module.dumps(data)
+                if not isinstance(data, (dict, list))
+                else data
+            }
             return DummyAsyncResponse(200, payload)
 
-        async def request(self, method, url, json=None, headers=None, params=None, timeout=None):  # type: ignore[override]
+        async def request(
+            self, method, url, json=None, headers=None, params=None, timeout=None
+        ):  # type: ignore[override]
             method_upper = method.upper()
             if method_upper == "DELETE":
                 scope = _scope(json or {})
                 store.get(scope, {}).pop((json or {}).get("key"), None)
                 return DummyAsyncResponse(200, {"ok": True})
             if method_upper == "GET":
-                return await self.get(url, params=params, headers=headers, timeout=timeout)
+                return await self.get(
+                    url, params=params, headers=headers, timeout=timeout
+                )
             # Default to POST semantics
             return await self.post(url, json=json, headers=headers, timeout=timeout)
 
         async def get(self, url, params=None, headers=None, timeout=None):  # type: ignore[override]
             scope = (params or {}).get("scope") or "default"
-            keys = [
-                {"key": key}
-                for key in sorted(store.get(scope, {}))
-            ]
+            keys = [{"key": key} for key in sorted(store.get(scope, {}))]
             return DummyAsyncResponse(200, keys)
 
     json_module = json

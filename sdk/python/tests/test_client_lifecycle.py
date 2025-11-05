@@ -3,7 +3,7 @@ import sys
 import types
 
 from brain_sdk.client import BrainClient
-from brain_sdk.types import AgentStatus, HeartbeatData, MCPServerHealth
+from brain_sdk.types import AgentStatus, HeartbeatData
 
 
 class DummyResponse:
@@ -12,6 +12,7 @@ class DummyResponse:
         self._payload = payload or {}
         self.content = b"{}"
         self.text = "{}"
+
     def raise_for_status(self):
         if not (200 <= self.status_code < 400):
             raise RuntimeError("bad status")
@@ -28,6 +29,7 @@ def test_send_enhanced_heartbeat_sync_success_and_failure(monkeypatch):
         return DummyResponse(200)
 
     import brain_sdk.client as client_mod
+
     monkeypatch.setattr(client_mod.requests, "post", ok_post)
 
     bc = BrainClient(base_url="http://example")
@@ -81,7 +83,12 @@ def test_register_agent_with_status_async(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "httpx", stub_httpx)
     client_mod.httpx = stub_httpx
-    monkeypatch.setattr(client_mod, "_ensure_httpx", lambda force_reload=False: stub_httpx, raising=False)
+    monkeypatch.setattr(
+        client_mod,
+        "_ensure_httpx",
+        lambda force_reload=False: stub_httpx,
+        raising=False,
+    )
 
     bc = BrainClient(base_url="http://example")
 
@@ -89,6 +96,7 @@ def test_register_agent_with_status_async(monkeypatch):
         return await bc.register_agent_with_status(
             node_id="n1", reasoners=[], skills=[], base_url="http://agent"
         )
+
     success, payload = asyncio.run(run())
     assert success is True
     assert payload == {}

@@ -8,8 +8,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/your-org/brain/control-plane/internal/services"
 	"github.com/stretchr/testify/require"
+	"github.com/your-org/brain/control-plane/internal/services"
 )
 
 type testPayloadStore struct {
@@ -57,7 +57,7 @@ func TestHasMeaningfulDataAllowsValidMap(t *testing.T) {
 
 func TestResolveExecutionDataFallsBackForCorruptedPreview(t *testing.T) {
 	store := newTestPayloadStore()
-	handler := &ExecutionHandler{payloadStore: store}
+	handler := &ExecutionHandler{payloads: store}
 
 	raw := []byte(`{"error":"corrupted_json_data","preview":"partial"}`)
 	uri := "payload://test"

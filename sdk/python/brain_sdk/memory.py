@@ -7,7 +7,7 @@ sharing and synchronization across distributed agents.
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 from .client import BrainClient
 from .execution_context import ExecutionContext
 from .memory_events import MemoryEventClient, ScopedMemoryEventClient
@@ -16,11 +16,11 @@ from .memory_events import MemoryEventClient, ScopedMemoryEventClient
 class MemoryClient:
     """
     Core memory client that communicates with the Brain server's memory API.
-    
+
     This client handles the low-level HTTP operations for memory management
     and automatically includes execution context headers for proper scoping.
     """
-    
+
     def __init__(self, brain_client: BrainClient, execution_context: ExecutionContext):
         self.brain_client = brain_client
         self.execution_context = execution_context
@@ -39,37 +39,35 @@ class MemoryClient:
             import requests
 
             return await asyncio.to_thread(requests.request, method, url, **kwargs)
-    
+
     async def set(self, key: str, data: Any, scope: Optional[str] = None) -> None:
         """
         Set a memory value with automatic scoping.
-        
+
         Args:
             key: The memory key
             data: The data to store (will be JSON serialized)
             scope: Optional explicit scope override
         """
         from brain_sdk.logger import log_debug
-        
+
         headers = self.execution_context.to_headers()
-        
-        payload = {
-            "key": key,
-            "data": data
-        }
-        
+
+        payload = {"key": key, "data": data}
+
         if scope:
             payload["scope"] = scope
-        
+
         # Test JSON serialization before sending
         try:
-            import json
-            json_payload = json.dumps(payload)
+            json.dumps(payload)
             log_debug(f"Memory set operation for key: {key}")
         except Exception as json_error:
-            log_debug(f"JSON serialization failed for memory key {key}: {type(json_error).__name__}: {json_error}")
+            log_debug(
+                f"JSON serialization failed for memory key {key}: {type(json_error).__name__}: {json_error}"
+            )
             raise
-        
+
         # Use synchronous requests to avoid event loop conflicts with Brain SDK
         url = f"{self.brain_client.api_base}/memory/set"
 
@@ -97,28 +95,28 @@ class MemoryClient:
         except Exception as e:
             log_debug(f"Memory set failed for key {key}: {type(e).__name__}: {e}")
             raise
-    
-    async def get(self, key: str, default: Any = None, scope: Optional[str] = None) -> Any:
+
+    async def get(
+        self, key: str, default: Any = None, scope: Optional[str] = None
+    ) -> Any:
         """
         Get a memory value with hierarchical lookup.
-        
+
         Args:
             key: The memory key
             default: Default value if key not found
             scope: Optional explicit scope override
-            
+
         Returns:
             The stored value or default if not found
         """
         headers = self.execution_context.to_headers()
-        
-        payload = {
-            "key": key
-        }
-        
+
+        payload = {"key": key}
+
         if scope:
             payload["scope"] = scope
-        
+
         response = await self._async_request(
             "POST",
             f"{self.brain_client.api_base}/memory/get",
@@ -145,41 +143,39 @@ class MemoryClient:
             return data
 
         return result
-    
+
     async def exists(self, key: str, scope: Optional[str] = None) -> bool:
         """
         Check if a memory key exists.
-        
+
         Args:
             key: The memory key
             scope: Optional explicit scope override
-            
+
         Returns:
             True if key exists, False otherwise
         """
         try:
             await self.get(key, scope=scope)
             return True
-        except:
+        except Exception:
             return False
-    
+
     async def delete(self, key: str, scope: Optional[str] = None) -> None:
         """
         Delete a memory value.
-        
+
         Args:
             key: The memory key
             scope: Optional explicit scope override
         """
         headers = self.execution_context.to_headers()
-        
-        payload = {
-            "key": key
-        }
-        
+
+        payload = {"key": key}
+
         if scope:
             payload["scope"] = scope
-        
+
         response = await self._async_request(
             "DELETE",
             f"{self.brain_client.api_base}/memory/delete",
@@ -188,19 +184,19 @@ class MemoryClient:
             timeout=10.0,
         )
         response.raise_for_status()
-    
+
     async def list_keys(self, scope: str) -> List[str]:
         """
         List all keys in a specific scope.
-        
+
         Args:
             scope: The scope to list keys from
-            
+
         Returns:
             List of memory keys in the scope
         """
         headers = self.execution_context.to_headers()
-        
+
         response = await self._async_request(
             "GET",
             f"{self.brain_client.api_base}/memory/list",
@@ -221,44 +217,54 @@ class MemoryClient:
 class ScopedMemoryClient:
     """
     Memory client that operates within a specific scope.
-    
+
     This provides a scoped view of memory operations, automatically
     using the specified scope for all operations.
     """
-    
-    def __init__(self, memory_client: MemoryClient, scope: str, scope_id: str, event_client: Optional[MemoryEventClient] = None):
+
+    def __init__(
+        self,
+        memory_client: MemoryClient,
+        scope: str,
+        scope_id: str,
+        event_client: Optional[MemoryEventClient] = None,
+    ):
         self.memory_client = memory_client
         self.scope = scope
         self.scope_id = scope_id
-        self.events = ScopedMemoryEventClient(event_client, scope, scope_id) if event_client else None
-    
+        self.events = (
+            ScopedMemoryEventClient(event_client, scope, scope_id)
+            if event_client
+            else None
+        )
+
     async def set(self, key: str, data: Any) -> None:
         """Set a value in this specific scope."""
         await self.memory_client.set(key, data, scope=self.scope)
-    
+
     async def get(self, key: str, default: Any = None) -> Any:
         """Get a value from this specific scope."""
         return await self.memory_client.get(key, default=default, scope=self.scope)
-    
+
     async def exists(self, key: str) -> bool:
         """Check if a key exists in this specific scope."""
         return await self.memory_client.exists(key, scope=self.scope)
-    
+
     async def delete(self, key: str) -> None:
         """Delete a value from this specific scope."""
         await self.memory_client.delete(key, scope=self.scope)
-    
+
     async def list_keys(self) -> List[str]:
         """List all keys in this specific scope."""
         return await self.memory_client.list_keys(self.scope)
-    
+
     def on_change(self, patterns: Union[str, List[str]]):
         """
         Decorator for subscribing to memory change events in this scope.
-        
+
         Args:
             patterns: Pattern(s) to match against memory keys
-            
+
         Returns:
             Decorator function
         """
@@ -268,36 +274,37 @@ class ScopedMemoryClient:
             # Return a no-op decorator if events are not available
             def decorator(func):
                 return func
+
             return decorator
 
 
 class GlobalMemoryClient:
     """
     Memory client for global scope operations.
-    
+
     This provides access to the global memory scope that is shared
     across all agents and sessions.
     """
-    
+
     def __init__(self, memory_client: MemoryClient):
         self.memory_client = memory_client
-    
+
     async def set(self, key: str, data: Any) -> None:
         """Set a value in global scope."""
         await self.memory_client.set(key, data, scope="global")
-    
+
     async def get(self, key: str, default: Any = None) -> Any:
         """Get a value from global scope."""
         return await self.memory_client.get(key, default=default, scope="global")
-    
+
     async def exists(self, key: str) -> bool:
         """Check if a key exists in global scope."""
         return await self.memory_client.exists(key, scope="global")
-    
+
     async def delete(self, key: str) -> None:
         """Delete a value from global scope."""
         await self.memory_client.delete(key, scope="global")
-    
+
     async def list_keys(self) -> List[str]:
         """List all keys in global scope."""
         return await self.memory_client.list_keys("global")
@@ -306,118 +313,122 @@ class GlobalMemoryClient:
 class MemoryInterface:
     """
     Developer-facing memory interface that provides the intuitive app.memory API.
-    
+
     This class provides the main interface that developers interact with,
     offering automatic scoping, hierarchical lookup, and explicit scope access.
     """
-    
+
     def __init__(self, memory_client: MemoryClient, event_client: MemoryEventClient):
         self.memory_client = memory_client
         self.events = event_client
-    
+
     async def set(self, key: str, data: Any) -> None:
         """
         Set a memory value with automatic scoping.
-        
+
         The value will be stored in the most specific available scope
         based on the current execution context.
-        
+
         Args:
             key: The memory key
             data: The data to store
         """
         await self.memory_client.set(key, data)
-    
+
     async def get(self, key: str, default: Any = None) -> Any:
         """
         Get a memory value with hierarchical lookup.
-        
+
         This will search through scopes in order: workflow -> session -> actor -> global
         and return the first match found.
-        
+
         Args:
             key: The memory key
             default: Default value if key not found in any scope
-            
+
         Returns:
             The stored value or default if not found
         """
         return await self.memory_client.get(key, default=default)
-    
+
     async def exists(self, key: str) -> bool:
         """
         Check if a memory key exists in any scope.
-        
+
         Args:
             key: The memory key
-            
+
         Returns:
             True if key exists in any scope, False otherwise
         """
         return await self.memory_client.exists(key)
-    
+
     async def delete(self, key: str) -> None:
         """
         Delete a memory value from the current scope.
-        
+
         Args:
             key: The memory key
         """
         await self.memory_client.delete(key)
-    
+
     def on_change(self, patterns: Union[str, List[str]]):
         """
         Decorator for subscribing to memory change events.
-        
+
         Args:
             patterns: Pattern(s) to match against memory keys
-            
+
         Returns:
             Decorator function
         """
         return self.events.on_change(patterns)
-    
+
     def session(self, session_id: str) -> ScopedMemoryClient:
         """
         Get a memory client scoped to a specific session.
-        
+
         Args:
             session_id: The session ID to scope to
-            
+
         Returns:
             ScopedMemoryClient for the specified session
         """
-        return ScopedMemoryClient(self.memory_client, "session", session_id, self.events)
-    
+        return ScopedMemoryClient(
+            self.memory_client, "session", session_id, self.events
+        )
+
     def actor(self, actor_id: str) -> ScopedMemoryClient:
         """
         Get a memory client scoped to a specific actor.
-        
+
         Args:
             actor_id: The actor ID to scope to
-            
+
         Returns:
             ScopedMemoryClient for the specified actor
         """
         return ScopedMemoryClient(self.memory_client, "actor", actor_id, self.events)
-    
+
     def workflow(self, workflow_id: str) -> ScopedMemoryClient:
         """
         Get a memory client scoped to a specific workflow.
-        
+
         Args:
             workflow_id: The workflow ID to scope to
-            
+
         Returns:
             ScopedMemoryClient for the specified workflow
         """
-        return ScopedMemoryClient(self.memory_client, "workflow", workflow_id, self.events)
-    
+        return ScopedMemoryClient(
+            self.memory_client, "workflow", workflow_id, self.events
+        )
+
     @property
     def global_scope(self) -> GlobalMemoryClient:
         """
         Get a memory client for global scope operations.
-        
+
         Returns:
             GlobalMemoryClient for global scope access
         """

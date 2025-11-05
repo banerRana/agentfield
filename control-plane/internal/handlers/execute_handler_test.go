@@ -3,11 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,55 +18,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type stubDispatcher struct {
-	t           *testing.T
-	payloads    services.PayloadStore
-	resultBytes []byte
-	dispatchErr error
-	lastStep    *types.WorkflowStep
-}
-
-func (d *stubDispatcher) Dispatch(step *types.WorkflowStep, wait bool) (<-chan *services.DispatchResult, error) {
-	d.lastStep = step
-	if !wait {
-		ch := make(chan *services.DispatchResult)
-		close(ch)
-		return ch, nil
-	}
-
-	ch := make(chan *services.DispatchResult, 1)
-	if d.dispatchErr != nil {
-		ch <- &services.DispatchResult{Step: step, Err: d.dispatchErr}
-		close(ch)
-		return ch, nil
-	}
-
-	record, err := d.payloads.SaveBytes(context.Background(), d.resultBytes)
-	require.NoError(d.t, err)
-	ch <- &services.DispatchResult{Step: step, ResultURI: &record.URI}
-	close(ch)
-	return ch, nil
-}
-
 func TestExecuteHandler_Success(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storage := newTestExecutionStorage(&types.AgentNode{
-		ID:      "node-1",
-		BaseURL: "http://agent",
-		Reasoners: []types.ReasonerDefinition{
-			{ID: "reasoner-a"},
-		},
-	})
-	payloads := services.NewFilePayloadStore(t.TempDir())
-	dispatcher := &stubDispatcher{
-		t:           t,
-		payloads:    payloads,
-		resultBytes: []byte(`{"answer":42}`),
+	var requestCount int32
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		require.Equal(t, "/reasoners/reasoner-a", r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		defer r.Body.Close()
+
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(body, &payload))
+		require.Equal(t, map[string]interface{}{"foo": "bar"}, payload)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"answer":42}`))
+	}))
+	defer agentServer.Close()
+
+	agent := &types.AgentNode{
+		ID:        "node-1",
+		BaseURL:   agentServer.URL,
+		Reasoners: []types.ReasonerDefinition{{ID: "reasoner-a"}},
 	}
 
+	store := newTestExecutionStorage(agent)
+	payloads := services.NewFilePayloadStore(t.TempDir())
+
 	router := gin.New()
-	router.POST("/api/v1/execute/:target", ExecuteHandler(storage, dispatcher, payloads, nil))
+	router.POST("/api/v1/execute/:target", ExecuteHandler(store, payloads, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/node-1.reasoner-a", strings.NewReader(`{"input":{"foo":"bar"}}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -76,97 +58,126 @@ func TestExecuteHandler_Success(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.Code)
 
-	var payload ExecuteResponse
-	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
-	require.Equal(t, types.ExecutionStatusSucceeded, payload.Status)
-	require.Equal(t, "node-1", payload.NodeID)
-	require.Equal(t, "reasoner", payload.Type)
-	require.NotEmpty(t, payload.ExecutionID)
-	require.NotEmpty(t, payload.RunID)
+	var envelope ExecuteResponse
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &envelope))
+	require.Equal(t, types.ExecutionStatusSucceeded, envelope.Status)
+	require.NotEmpty(t, envelope.ExecutionID)
+	require.NotEmpty(t, envelope.RunID)
+	require.GreaterOrEqual(t, envelope.DurationMS, int64(0))
+	require.False(t, envelope.WebhookRegistered)
 
-	resultMap, ok := payload.Result.(map[string]any)
+	result, ok := envelope.Result.(map[string]interface{})
 	require.True(t, ok)
-	require.Equal(t, float64(42), resultMap["answer"])
+	require.Equal(t, float64(42), result["answer"])
 
-	require.NotNil(t, dispatcher.lastStep)
-	require.NotNil(t, dispatcher.lastStep.InputURI)
-	reader, err := payloads.Open(context.Background(), *dispatcher.lastStep.InputURI)
+	record, err := store.GetExecutionRecord(context.Background(), envelope.ExecutionID)
 	require.NoError(t, err)
-	defer reader.Close()
-	saved, err := io.ReadAll(reader)
-	require.NoError(t, err)
-	var storedInput map[string]any
-	require.NoError(t, json.Unmarshal(saved, &storedInput))
-	require.Equal(t, map[string]any{"foo": "bar"}, storedInput)
+	require.NotNil(t, record)
+	require.Equal(t, types.ExecutionStatusSucceeded, record.Status)
+	require.NotNil(t, record.ResultPayload)
+	require.NotNil(t, record.ResultURI)
+	require.Greater(t, len(record.ResultPayload), 0)
+
+	require.Equal(t, int32(1), atomic.LoadInt32(&requestCount))
 }
 
-func TestExecuteHandler_DispatchError(t *testing.T) {
+func TestExecuteHandler_AgentError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storage := newTestExecutionStorage(&types.AgentNode{
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"boom"}`))
+	}))
+	defer agentServer.Close()
+
+	agent := &types.AgentNode{
 		ID:        "node-1",
-		BaseURL:   "http://agent",
+		BaseURL:   agentServer.URL,
 		Reasoners: []types.ReasonerDefinition{{ID: "reasoner-a"}},
-	})
-	payloads := services.NewFilePayloadStore(t.TempDir())
-	dispatcher := &stubDispatcher{
-		t:           t,
-		payloads:    payloads,
-		dispatchErr: assertError("boom"),
 	}
 
-	router := gin.New()
-	router.POST("/api/v1/execute/:target", ExecuteHandler(storage, dispatcher, payloads, nil))
+	store := newTestExecutionStorage(agent)
+	payloads := services.NewFilePayloadStore(t.TempDir())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/node-1.reasoner-a", strings.NewReader(`{"input":{}}`))
+	router := gin.New()
+	router.POST("/api/v1/execute/:target", ExecuteHandler(store, payloads, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/node-1.reasoner-a", strings.NewReader(`{"input":{"foo":"bar"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 
 	router.ServeHTTP(resp, req)
 
-	require.Equal(t, http.StatusOK, resp.Code)
+	require.Equal(t, http.StatusBadRequest, resp.Code)
 
-	var payload ExecuteResponse
+	var payload map[string]string
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
-	require.Equal(t, types.ExecutionStatusFailed, payload.Status)
-	require.Contains(t, *payload.ErrorMessage, "boom")
-	require.NotEmpty(t, payload.RunID)
+	require.Contains(t, payload["error"], "agent error (500)")
+
+	records, err := store.QueryExecutionRecords(context.Background(), types.ExecutionFilter{})
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, types.ExecutionStatusFailed, records[0].Status)
+	require.NotNil(t, records[0].ErrorMessage)
+	require.Contains(t, *records[0].ErrorMessage, "agent error (500)")
 }
 
 func TestExecuteHandler_TargetNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storage := newTestExecutionStorage(&types.AgentNode{ID: "node-1"})
+	agent := &types.AgentNode{
+		ID:        "node-1",
+		BaseURL:   "http://agent.example",
+		Reasoners: []types.ReasonerDefinition{{ID: "reasoner-a"}},
+	}
+
+	store := newTestExecutionStorage(agent)
 	payloads := services.NewFilePayloadStore(t.TempDir())
-	dispatcher := &stubDispatcher{t: t, payloads: payloads, resultBytes: []byte("{}")}
 
 	router := gin.New()
-	router.POST("/api/v1/execute/:target", ExecuteHandler(storage, dispatcher, payloads, nil))
+	router.POST("/api/v1/execute/:target", ExecuteHandler(store, payloads, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/node-1.unknown", strings.NewReader(`{"input":{}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/node-1.unknown", strings.NewReader(`{"input":{"foo":"bar"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 
 	router.ServeHTTP(resp, req)
 
-	require.Equal(t, http.StatusNotFound, resp.Code)
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+
+	var payload map[string]string
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
+	require.Contains(t, payload["error"], "target 'unknown' not found")
+
+	records, err := store.QueryExecutionRecords(context.Background(), types.ExecutionFilter{})
+	require.NoError(t, err)
+	require.Len(t, records, 0)
 }
 
 func TestExecuteAsyncHandler_ReturnsAccepted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storage := newTestExecutionStorage(&types.AgentNode{
+	var requestCount int32
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer agentServer.Close()
+
+	agent := &types.AgentNode{
 		ID:        "node-1",
-		BaseURL:   "http://agent",
+		BaseURL:   agentServer.URL,
 		Reasoners: []types.ReasonerDefinition{{ID: "reasoner-a"}},
-	})
+	}
+
+	store := newTestExecutionStorage(agent)
 	payloads := services.NewFilePayloadStore(t.TempDir())
-	dispatcher := &stubDispatcher{t: t, payloads: payloads}
 
 	router := gin.New()
-	router.POST("/api/v1/execute/async/:target", ExecuteAsyncHandler(storage, dispatcher, payloads, nil))
+	router.POST("/api/v1/execute/async/:target", ExecuteAsyncHandler(store, payloads, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/async/node-1.reasoner-a", strings.NewReader(`{"input":{"abc":123}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/async/node-1.reasoner-a", strings.NewReader(`{"input":{"foo":"bar"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 
@@ -178,27 +189,29 @@ func TestExecuteAsyncHandler_ReturnsAccepted(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
 	require.NotEmpty(t, payload.ExecutionID)
 	require.NotEmpty(t, payload.RunID)
-	require.Equal(t, servicesStepStatusPending, payload.Status)
+	require.Equal(t, string(types.ExecutionStatusQueued), payload.Status)
 
-	storedExec, err := storage.GetWorkflowExecution(context.Background(), payload.ExecutionID)
-	require.NoError(t, err)
-	require.NotNil(t, storedExec)
-	require.Equal(t, "node-1", storedExec.AgentNodeID)
+	require.Eventually(t, func() bool {
+		record, err := store.GetExecutionRecord(context.Background(), payload.ExecutionID)
+		if err != nil || record == nil {
+			return false
+		}
+		return record.Status == types.ExecutionStatusSucceeded
+	}, 2*time.Second, 50*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&requestCount) > 0
+	}, time.Second, 50*time.Millisecond)
 }
 
 func TestExecuteAsyncHandler_InvalidJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storage := newTestExecutionStorage(&types.AgentNode{
-		ID:        "node-1",
-		BaseURL:   "http://agent",
-		Reasoners: []types.ReasonerDefinition{{ID: "reasoner-a"}},
-	})
+	store := newTestExecutionStorage(&types.AgentNode{ID: "node-1"})
 	payloads := services.NewFilePayloadStore(t.TempDir())
-	dispatcher := &stubDispatcher{t: t, payloads: payloads}
 
 	router := gin.New()
-	router.POST("/api/v1/execute/async/:target", ExecuteAsyncHandler(storage, dispatcher, payloads, nil))
+	router.POST("/api/v1/execute/async/:target", ExecuteAsyncHandler(store, payloads, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/async/node-1.reasoner-a", strings.NewReader("not-json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -212,33 +225,26 @@ func TestExecuteAsyncHandler_InvalidJSON(t *testing.T) {
 func TestGetExecutionStatusHandler_ReturnsResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storage := newTestExecutionStorage(&types.AgentNode{ID: "node-1"})
-	payloads := services.NewFilePayloadStore(t.TempDir())
-	result, err := payloads.SaveBytes(context.Background(), []byte(`{"ok":true}`))
-	require.NoError(t, err)
+	store := newTestExecutionStorage(nil)
+	now := time.Now().UTC()
+	result := json.RawMessage(`{"ok":true}`)
 
-	exec := &types.WorkflowExecution{
-		WorkflowID:  "wf-1",
-		ExecutionID: "exec-1",
-		AgentNodeID: "node-1",
-		ReasonerID:  "reasoner-a",
-		Status:      servicesStepStatusSucceeded,
-		StartedAt:   time.Now().Add(-time.Minute),
-		CompletedAt: ptrTime(time.Now()),
-		DurationMS:  ptrInt64(42),
+	execution := &types.Execution{
+		ExecutionID:   "exec-1",
+		RunID:         "run-1",
+		AgentNodeID:   "node-1",
+		ReasonerID:    "reasoner-a",
+		Status:        types.ExecutionStatusSucceeded,
+		ResultPayload: result,
+		ResultURI:     ptrString("payload://result"),
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
-	require.NoError(t, storage.StoreWorkflowExecution(context.Background(), exec))
-
-	step := &types.WorkflowStep{
-		StepID:    "exec-1",
-		RunID:     "wf-1",
-		Status:    servicesStepStatusSucceeded,
-		ResultURI: &result.URI,
-	}
-	require.NoError(t, storage.StoreWorkflowStep(context.Background(), step))
+	require.NoError(t, store.CreateExecutionRecord(context.Background(), execution))
 
 	router := gin.New()
-	router.GET("/api/v1/executions/:execution_id", GetExecutionStatusHandler(storage, payloads, nil))
+	router.GET("/api/v1/executions/:execution_id", GetExecutionStatusHandler(store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions/exec-1", nil)
 	resp := httptest.NewRecorder()
@@ -250,7 +256,9 @@ func TestGetExecutionStatusHandler_ReturnsResult(t *testing.T) {
 	var payload ExecutionStatusResponse
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
 	require.Equal(t, "exec-1", payload.ExecutionID)
-	resultMap, ok := payload.Result.(map[string]any)
+	require.Equal(t, types.ExecutionStatusSucceeded, payload.Status)
+
+	resultMap, ok := payload.Result.(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, true, resultMap["ok"])
 }
@@ -258,22 +266,19 @@ func TestGetExecutionStatusHandler_ReturnsResult(t *testing.T) {
 func TestBatchExecutionStatusHandler_MixedResults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storage := newTestExecutionStorage(&types.AgentNode{ID: "node-1"})
-	payloads := services.NewFilePayloadStore(t.TempDir())
-
-	exec := &types.WorkflowExecution{
-		WorkflowID:  "wf-1",
+	store := newTestExecutionStorage(nil)
+	now := time.Now().UTC()
+	require.NoError(t, store.CreateExecutionRecord(context.Background(), &types.Execution{
 		ExecutionID: "exec-ok",
-		AgentNodeID: "node-1",
-		ReasonerID:  "reasoner-a",
-		Status:      servicesStepStatusSucceeded,
-		StartedAt:   time.Now().Add(-time.Second),
-		CompletedAt: ptrTime(time.Now()),
-	}
-	require.NoError(t, storage.StoreWorkflowExecution(context.Background(), exec))
+		RunID:       "run-1",
+		Status:      types.ExecutionStatusSucceeded,
+		StartedAt:   now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}))
 
 	router := gin.New()
-	router.POST("/api/v1/executions/batch-status", BatchExecutionStatusHandler(storage, payloads, nil))
+	router.POST("/api/v1/executions/batch-status", BatchExecutionStatusHandler(store))
 
 	body := `{"execution_ids":["exec-ok","exec-missing"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/executions/batch-status", strings.NewReader(body))
@@ -286,10 +291,10 @@ func TestBatchExecutionStatusHandler_MixedResults(t *testing.T) {
 
 	var payload BatchStatusResponse
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
-	require.Equal(t, servicesStepStatusSucceeded, payload["exec-ok"].Status)
+	require.Equal(t, types.ExecutionStatusSucceeded, payload["exec-ok"].Status)
 	require.Equal(t, "not_found", payload["exec-missing"].Status)
 }
 
-func assertError(msg string) error {
-	return fmt.Errorf(msg)
+func ptrString(value string) *string {
+	return &value
 }

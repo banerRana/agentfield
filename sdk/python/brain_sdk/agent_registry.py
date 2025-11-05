@@ -13,17 +13,17 @@ if TYPE_CHECKING:
 _thread_local = threading.local()
 
 
-def set_current_agent(agent_instance: 'Agent'):
+def set_current_agent(agent_instance: "Agent"):
     """Register the current agent instance for this thread."""
     _thread_local.current_agent = agent_instance
 
 
-def get_current_agent_instance() -> Optional['Agent']:
+def get_current_agent_instance() -> Optional["Agent"]:
     """Get the current agent instance for this thread."""
-    return getattr(_thread_local, 'current_agent', None)
+    return getattr(_thread_local, "current_agent", None)
 
 
 def clear_current_agent():
     """Clear the current agent instance."""
-    if hasattr(_thread_local, 'current_agent'):
-        delattr(_thread_local, 'current_agent')
+    if hasattr(_thread_local, "current_agent"):
+        delattr(_thread_local, "current_agent")

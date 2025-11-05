@@ -13,9 +13,11 @@ import (
 type testExecutionStorage struct {
 	mu                        sync.Mutex
 	agent                     *types.AgentNode
-	executions                map[string]*types.WorkflowExecution
+	workflowExecutions        map[string]*types.WorkflowExecution
+	executionRecords          map[string]*types.Execution
 	runs                      map[string]*types.WorkflowRun
 	steps                     map[string]*types.WorkflowStep
+	webhooks                  map[string]*types.ExecutionWebhook
 	eventBus                  *events.ExecutionEventBus
 	workflowExecutionEventBus *events.EventBus[*types.WorkflowExecutionEvent]
 	workflowRunEventBus       *events.EventBus[*types.WorkflowRunEvent]
@@ -25,9 +27,11 @@ type testExecutionStorage struct {
 func newTestExecutionStorage(agent *types.AgentNode) *testExecutionStorage {
 	return &testExecutionStorage{
 		agent:                     agent,
-		executions:                make(map[string]*types.WorkflowExecution),
+		workflowExecutions:        make(map[string]*types.WorkflowExecution),
+		executionRecords:          make(map[string]*types.Execution),
 		runs:                      make(map[string]*types.WorkflowRun),
 		steps:                     make(map[string]*types.WorkflowStep),
+		webhooks:                  make(map[string]*types.ExecutionWebhook),
 		eventBus:                  events.NewExecutionEventBus(),
 		workflowExecutionEventBus: events.NewEventBus[*types.WorkflowExecutionEvent](),
 		workflowRunEventBus:       events.NewEventBus[*types.WorkflowRunEvent](),
@@ -39,7 +43,7 @@ func (s *testExecutionStorage) GetAgent(ctx context.Context, id string) (*types.
 	if s.agent != nil && s.agent.ID == id {
 		return s.agent, nil
 	}
-	return nil, fmt.Errorf("agent %s not found", id)
+	return nil, nil
 }
 
 func (s *testExecutionStorage) StoreWorkflowExecution(ctx context.Context, execution *types.WorkflowExecution) error {
@@ -48,7 +52,7 @@ func (s *testExecutionStorage) StoreWorkflowExecution(ctx context.Context, execu
 	if execution == nil {
 		return fmt.Errorf("execution cannot be nil")
 	}
-	s.executions[execution.ExecutionID] = execution
+	s.workflowExecutions[execution.ExecutionID] = execution
 	select {
 	case s.updateCh <- execution.ExecutionID:
 	default:
@@ -60,7 +64,7 @@ func (s *testExecutionStorage) UpdateWorkflowExecution(ctx context.Context, exec
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	existing, ok := s.executions[executionID]
+	existing, ok := s.workflowExecutions[executionID]
 	if !ok {
 		return fmt.Errorf("execution %s not found", executionID)
 	}
@@ -74,7 +78,7 @@ func (s *testExecutionStorage) UpdateWorkflowExecution(ctx context.Context, exec
 		return err
 	}
 	if updated != nil {
-		s.executions[executionID] = updated
+		s.workflowExecutions[executionID] = updated
 	}
 	select {
 	case s.updateCh <- executionID:
@@ -86,7 +90,7 @@ func (s *testExecutionStorage) UpdateWorkflowExecution(ctx context.Context, exec
 func (s *testExecutionStorage) GetWorkflowExecution(ctx context.Context, executionID string) (*types.WorkflowExecution, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	execution, ok := s.executions[executionID]
+	execution, ok := s.workflowExecutions[executionID]
 	if !ok {
 		return nil, nil
 	}
@@ -196,7 +200,83 @@ func (s *testExecutionStorage) GetWorkflowRunEventBus() *events.EventBus[*types.
 }
 
 func (s *testExecutionStorage) RegisterExecutionWebhook(ctx context.Context, webhook *types.ExecutionWebhook) error {
+	if webhook == nil {
+		return fmt.Errorf("webhook cannot be nil")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webhooks[webhook.ExecutionID] = webhook
 	return nil
+}
+
+func (s *testExecutionStorage) CreateExecutionRecord(ctx context.Context, execution *types.Execution) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if execution == nil {
+		return fmt.Errorf("execution cannot be nil")
+	}
+	copy := *execution
+	s.executionRecords[execution.ExecutionID] = &copy
+	select {
+	case s.updateCh <- execution.ExecutionID:
+	default:
+	}
+	return nil
+}
+
+func (s *testExecutionStorage) GetExecutionRecord(ctx context.Context, executionID string) (*types.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	execution, ok := s.executionRecords[executionID]
+	if !ok {
+		return nil, nil
+	}
+	copy := *execution
+	return &copy, nil
+}
+
+func (s *testExecutionStorage) UpdateExecutionRecord(ctx context.Context, executionID string, update func(*types.Execution) (*types.Execution, error)) (*types.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, ok := s.executionRecords[executionID]
+	if !ok {
+		return nil, fmt.Errorf("execution %s not found", executionID)
+	}
+
+	cloned := *current
+	updated, err := update(&cloned)
+	if err != nil {
+		return nil, err
+	}
+	if updated != nil {
+		cloned = *updated
+	}
+	s.executionRecords[executionID] = &cloned
+	select {
+	case s.updateCh <- executionID:
+	default:
+	}
+	out := cloned
+	return &out, nil
+}
+
+func (s *testExecutionStorage) QueryExecutionRecords(ctx context.Context, filter types.ExecutionFilter) ([]*types.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	results := make([]*types.Execution, 0, len(s.executionRecords))
+	for _, exec := range s.executionRecords {
+		if filter.ExecutionID != nil && *filter.ExecutionID != exec.ExecutionID {
+			continue
+		}
+		if filter.RunID != nil && *filter.RunID != exec.RunID {
+			continue
+		}
+		copy := *exec
+		results = append(results, &copy)
+	}
+	return results, nil
 }
 
 func ptrTime(t time.Time) *time.Time {

@@ -80,11 +80,7 @@ def setup_litellm_stub(monkeypatch):
 
 def make_chat_response(content: str):
     return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(content=content, audio=None)
-            )
-        ]
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content, audio=None))]
     )
 
 
@@ -131,8 +127,12 @@ async def test_ai_simple_text(monkeypatch, agent_with_ai):
 
     monkeypatch.setattr(ai, "_ensure_model_limits_cached", lambda: asyncio.sleep(0))
     monkeypatch.setattr(ai, "_get_rate_limiter", lambda: DummyLimiter())
-    monkeypatch.setattr("brain_sdk.agent_ai.AgentUtils.detect_input_type", lambda value: "text")
-    monkeypatch.setattr("brain_sdk.agent_ai.AgentUtils.serialize_result", lambda value: value)
+    monkeypatch.setattr(
+        "brain_sdk.agent_ai.AgentUtils.detect_input_type", lambda value: "text"
+    )
+    monkeypatch.setattr(
+        "brain_sdk.agent_ai.AgentUtils.serialize_result", lambda value: value
+    )
 
     result = await ai.ai("Hello world")
     assert hasattr(result, "text")
@@ -166,8 +166,12 @@ async def test_ai_uses_fallback_models(monkeypatch, agent_with_ai):
     ai = AgentAI(agent_with_ai)
     monkeypatch.setattr(ai, "_ensure_model_limits_cached", lambda: asyncio.sleep(0))
     monkeypatch.setattr(ai, "_get_rate_limiter", lambda: limiter)
-    monkeypatch.setattr("brain_sdk.agent_ai.AgentUtils.detect_input_type", lambda value: "text")
-    monkeypatch.setattr("brain_sdk.agent_ai.AgentUtils.serialize_result", lambda value: value)
+    monkeypatch.setattr(
+        "brain_sdk.agent_ai.AgentUtils.detect_input_type", lambda value: "text"
+    )
+    monkeypatch.setattr(
+        "brain_sdk.agent_ai.AgentUtils.serialize_result", lambda value: value
+    )
 
     result = await ai.ai("hello")
 
@@ -184,8 +188,12 @@ async def test_ai_skips_rate_limiter_when_disabled(monkeypatch, agent_with_ai):
 
     ai = AgentAI(agent_with_ai)
     monkeypatch.setattr(ai, "_ensure_model_limits_cached", lambda: asyncio.sleep(0))
-    monkeypatch.setattr("brain_sdk.agent_ai.AgentUtils.detect_input_type", lambda value: "text")
-    monkeypatch.setattr("brain_sdk.agent_ai.AgentUtils.serialize_result", lambda value: value)
+    monkeypatch.setattr(
+        "brain_sdk.agent_ai.AgentUtils.detect_input_type", lambda value: "text"
+    )
+    monkeypatch.setattr(
+        "brain_sdk.agent_ai.AgentUtils.serialize_result", lambda value: value
+    )
 
     result = await ai.ai("hello")
     assert result.text == "ok"
@@ -226,7 +234,9 @@ async def test_ai_with_audio_non_tts_calls_ai(monkeypatch, agent_with_ai):
 
     monkeypatch.setattr(ai, "ai", fake_ai)
 
-    result = await ai.ai_with_audio("hello", model="openai/gpt-4o", voice="alloy", format="mp3")
+    result = await ai.ai_with_audio(
+        "hello", model="openai/gpt-4o", voice="alloy", format="mp3"
+    )
 
     assert result == "delegated"
     assert captured["kwargs"]["modalities"] == ["text", "audio"]

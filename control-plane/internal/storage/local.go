@@ -1,14 +1,14 @@
 package storage
 
 import (
-	"github.com/your-org/brain/control-plane/internal/events"
-	"github.com/your-org/brain/control-plane/pkg/types"
 	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/your-org/brain/control-plane/internal/events"
+	"github.com/your-org/brain/control-plane/pkg/types"
 	"log"
 	"net/url"
 	"os"
@@ -156,6 +156,259 @@ func (ls *LocalStorage) getWorkflowExecutionByID(ctx context.Context, q DBTX, ex
 	}
 
 	return execution, nil
+}
+
+func (ls *LocalStorage) StoreWorkflowRun(ctx context.Context, run *types.WorkflowRun) error {
+	if run == nil {
+		return fmt.Errorf("workflow run cannot be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	db := ls.requireSQLDB()
+	createdAt := run.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	updatedAt := run.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = createdAt
+	}
+	metadata := "{}"
+	if len(run.Metadata) > 0 {
+		metadata = string(run.Metadata)
+	}
+
+	query := `
+		INSERT INTO workflow_runs (
+			run_id, root_workflow_id, root_execution_id, status, total_steps,
+			completed_steps, failed_steps, state_version, last_event_sequence,
+			metadata, created_at, updated_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(run_id) DO UPDATE SET
+			root_workflow_id=excluded.root_workflow_id,
+			root_execution_id=excluded.root_execution_id,
+			status=excluded.status,
+			total_steps=excluded.total_steps,
+			completed_steps=excluded.completed_steps,
+			failed_steps=excluded.failed_steps,
+			state_version=excluded.state_version,
+			last_event_sequence=excluded.last_event_sequence,
+			metadata=excluded.metadata,
+			updated_at=excluded.updated_at,
+			completed_at=excluded.completed_at
+	`
+
+	_, err := db.ExecContext(
+		ctx,
+		query,
+		run.RunID,
+		run.RootWorkflowID,
+		run.RootExecutionID,
+		run.Status,
+		run.TotalSteps,
+		run.CompletedSteps,
+		run.FailedSteps,
+		run.StateVersion,
+		run.LastEventSequence,
+		metadata,
+		createdAt.UTC(),
+		updatedAt.UTC(),
+		run.CompletedAt,
+	)
+	return err
+}
+
+func (ls *LocalStorage) GetWorkflowRun(ctx context.Context, runID string) (*types.WorkflowRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(runID) == "" {
+		return nil, fmt.Errorf("run_id cannot be empty")
+	}
+
+	db := ls.requireSQLDB()
+	query := `
+		SELECT run_id, root_workflow_id, root_execution_id, status, total_steps,
+		       completed_steps, failed_steps, state_version, last_event_sequence,
+		       metadata, created_at, updated_at, completed_at
+		FROM workflow_runs
+		WHERE run_id = ?
+	`
+
+	row := db.QueryRowContext(ctx, query, runID)
+
+	var (
+		rootExecutionID sql.NullString
+		metadata        sql.NullString
+		completedAt     sql.NullTime
+		run             types.WorkflowRun
+	)
+
+	if err := row.Scan(
+		&run.RunID,
+		&run.RootWorkflowID,
+		&rootExecutionID,
+		&run.Status,
+		&run.TotalSteps,
+		&run.CompletedSteps,
+		&run.FailedSteps,
+		&run.StateVersion,
+		&run.LastEventSequence,
+		&metadata,
+		&run.CreatedAt,
+		&run.UpdatedAt,
+		&completedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if rootExecutionID.Valid {
+		run.RootExecutionID = &rootExecutionID.String
+	}
+	if completedAt.Valid {
+		ts := completedAt.Time
+		run.CompletedAt = &ts
+	}
+
+	if metadata.Valid && strings.TrimSpace(metadata.String) != "" {
+		run.Metadata = json.RawMessage(metadata.String)
+	} else {
+		run.Metadata = json.RawMessage(`{}`)
+	}
+
+	return &run, nil
+}
+
+func (ls *LocalStorage) StoreWorkflowRunEvent(ctx context.Context, event *types.WorkflowRunEvent) error {
+	if event == nil {
+		return fmt.Errorf("workflow run event cannot be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	db := ls.requireSQLDB()
+
+	payload := "{}"
+	if len(event.Payload) > 0 {
+		payload = string(event.Payload)
+	}
+
+	recordedAt := event.RecordedAt
+	if recordedAt.IsZero() {
+		recordedAt = time.Now().UTC()
+	}
+
+	query := `
+		INSERT INTO workflow_run_events (
+			run_id, sequence, previous_sequence, event_type,
+			status, status_reason, payload, emitted_at, recorded_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.ExecContext(
+		ctx,
+		query,
+		event.RunID,
+		event.Sequence,
+		event.PreviousSequence,
+		event.EventType,
+		event.Status,
+		event.StatusReason,
+		payload,
+		event.EmittedAt.UTC(),
+		recordedAt.UTC(),
+	)
+	return err
+}
+
+func (ls *LocalStorage) StoreWorkflowStep(ctx context.Context, step *types.WorkflowStep) error {
+	if step == nil {
+		return fmt.Errorf("workflow step cannot be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	db := ls.requireSQLDB()
+	metadata := "{}"
+	if len(step.Metadata) > 0 {
+		metadata = string(step.Metadata)
+	}
+
+	notBefore := step.NotBefore
+	if notBefore.IsZero() {
+		notBefore = time.Now().UTC()
+	}
+
+	createdAt := step.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+
+	updatedAt := step.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = createdAt
+	}
+
+	query := `
+		INSERT INTO workflow_steps (
+			step_id, run_id, parent_step_id, execution_id, agent_node_id,
+			target, status, attempt, priority, not_before, input_uri, result_uri,
+			error_message, metadata, started_at, completed_at, leased_at,
+			lease_timeout, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(step_id) DO UPDATE SET
+			run_id=excluded.run_id,
+			parent_step_id=excluded.parent_step_id,
+			execution_id=excluded.execution_id,
+			agent_node_id=excluded.agent_node_id,
+			target=excluded.target,
+			status=excluded.status,
+			attempt=excluded.attempt,
+			priority=excluded.priority,
+			not_before=excluded.not_before,
+			input_uri=excluded.input_uri,
+			result_uri=excluded.result_uri,
+			error_message=excluded.error_message,
+			metadata=excluded.metadata,
+			started_at=excluded.started_at,
+			completed_at=excluded.completed_at,
+			leased_at=excluded.leased_at,
+			lease_timeout=excluded.lease_timeout,
+			updated_at=excluded.updated_at
+	`
+
+	_, err := db.ExecContext(
+		ctx,
+		query,
+		step.StepID,
+		step.RunID,
+		step.ParentStepID,
+		step.ExecutionID,
+		step.AgentNodeID,
+		step.Target,
+		step.Status,
+		step.Attempt,
+		step.Priority,
+		notBefore.UTC(),
+		step.InputURI,
+		step.ResultURI,
+		step.ErrorMessage,
+		metadata,
+		step.StartedAt,
+		step.CompletedAt,
+		step.LeasedAt,
+		step.LeaseTimeout,
+		createdAt.UTC(),
+		updatedAt.UTC(),
+	)
+	return err
 }
 
 // DBTX interface for operations that can run on a db or tx

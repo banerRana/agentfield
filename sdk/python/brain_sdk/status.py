@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Set
+from typing import Set
 
 CANONICAL_STATUSES: tuple[str, ...] = (
     "pending",

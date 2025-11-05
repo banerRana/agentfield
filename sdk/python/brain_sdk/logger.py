@@ -13,11 +13,12 @@ import json
 import logging
 import os
 from enum import Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional
 
 
 class LogLevel(Enum):
     """Log levels for Brain SDK"""
+
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARN = "WARN"
@@ -31,18 +32,18 @@ class BrainLogger:
 
     Supports runtime log level changes (e.g., for dev_mode).
     """
-    
+
     def __init__(self, name: str = "brain_sdk"):
         self.logger = logging.getLogger(name)
         self._setup_logger()
-        
+
         # Configuration from environment variables - default to WARNING (only important events)
         self.log_level = os.getenv("BRAIN_LOG_LEVEL", "WARNING").upper()
         self.truncate_length = int(os.getenv("BRAIN_LOG_TRUNCATE", "200"))
         self.show_payloads = os.getenv("BRAIN_LOG_PAYLOADS", "false").lower() == "true"
         self.show_tracking = os.getenv("BRAIN_LOG_TRACKING", "false").lower() == "true"
         self.show_fire = os.getenv("BRAIN_LOG_FIRE", "false").lower() == "true"
-        
+
         # Set logger level based on configuration
         level_map = {
             "DEBUG": logging.DEBUG,
@@ -50,7 +51,7 @@ class BrainLogger:
             "WARN": logging.WARNING,
             "WARNING": logging.WARNING,
             "ERROR": logging.ERROR,
-            "SILENT": logging.CRITICAL + 1  # Effectively silent
+            "SILENT": logging.CRITICAL + 1,  # Effectively silent
         }
         self.logger.setLevel(level_map.get(self.log_level, logging.WARNING))
 
@@ -61,70 +62,74 @@ class BrainLogger:
             "INFO": logging.INFO,
             "WARN": logging.WARNING,
             "WARNING": logging.WARNING,
-            "ERROR": logging.ERROR
+            "ERROR": logging.ERROR,
         }
         self.logger.setLevel(level_map.get(level.upper(), logging.INFO))
-    
+
     def _setup_logger(self):
         """Setup logger with console handler if not already configured"""
         if not self.logger.handlers:
             handler = logging.StreamHandler()
-            formatter = logging.Formatter('%(message)s')
+            formatter = logging.Formatter("%(message)s")
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
             self.logger.propagate = False
-    
+
     def _truncate_message(self, message: str) -> str:
         """Truncate message if it exceeds the configured length"""
         if len(message) <= self.truncate_length:
             return message
-        return message[:self.truncate_length] + "..."
-    
+        return message[: self.truncate_length] + "..."
+
     def _format_payload(self, payload: Any) -> str:
         """Format payload for logging with truncation"""
         if not self.show_payloads:
             return "[payload hidden - set BRAIN_LOG_PAYLOADS=true to show]"
-        
+
         try:
             if isinstance(payload, dict):
                 payload_str = json.dumps(payload, indent=2, default=str)
             else:
                 payload_str = str(payload)
-            
+
             return self._truncate_message(payload_str)
         except Exception:
             return self._truncate_message(str(payload))
-    
+
     def heartbeat(self, message: str, **kwargs):
         """Log heartbeat messages (only shown in debug mode to avoid spam)"""
         self.logger.debug(f"💓 {message}")
-    
+
     def track(self, message: str, **kwargs):
         """Log tracking messages (controlled by BRAIN_LOG_TRACKING)"""
         if self.show_tracking:
             self.logger.debug(f"🔍 TRACK: {self._truncate_message(message)}")
-    
+
     def fire(self, message: str, payload: Optional[Any] = None, **kwargs):
         """Log fire-and-forget workflow messages (controlled by BRAIN_LOG_FIRE)"""
         if self.show_fire:
             if payload is not None:
                 formatted_payload = self._format_payload(payload)
-                self.logger.debug(f"🔥 FIRE: {self._truncate_message(message)}\n{formatted_payload}")
+                self.logger.debug(
+                    f"🔥 FIRE: {self._truncate_message(message)}\n{formatted_payload}"
+                )
             else:
                 self.logger.debug(f"🔥 FIRE: {self._truncate_message(message)}")
-    
+
     def debug(self, message: str, payload: Optional[Any] = None, **kwargs):
         """Log debug messages"""
         if payload is not None:
             formatted_payload = self._format_payload(payload)
-            self.logger.debug(f"🔍 DEBUG: {self._truncate_message(message)}\n{formatted_payload}")
+            self.logger.debug(
+                f"🔍 DEBUG: {self._truncate_message(message)}\n{formatted_payload}"
+            )
         else:
             self.logger.debug(f"🔍 DEBUG: {self._truncate_message(message)}")
-    
+
     def info(self, message: str, **kwargs):
         """Log info messages"""
         self.logger.info(f"ℹ️ {self._truncate_message(message)}")
-    
+
     def warn(self, message: str, **kwargs):
         """Log warning messages"""
         self.logger.warning(f"⚠️ {self._truncate_message(message)}")
@@ -140,23 +145,23 @@ class BrainLogger:
     def critical(self, message: str, **kwargs):
         """Log critical messages"""
         self.logger.critical(f"🚨 {self._truncate_message(message)}")
-    
+
     def success(self, message: str, **kwargs):
         """Log success messages"""
         self.logger.info(f"✅ {self._truncate_message(message)}")
-    
+
     def setup(self, message: str, **kwargs):
         """Log setup/initialization messages"""
         self.logger.info(f"🔧 {self._truncate_message(message)}")
-    
+
     def network(self, message: str, **kwargs):
         """Log network-related messages"""
         self.logger.info(f"🌐 {self._truncate_message(message)}")
-    
+
     def mcp(self, message: str, **kwargs):
         """Log MCP-related messages"""
         self.logger.info(f"🔌 {self._truncate_message(message)}")
-    
+
     def security(self, message: str, **kwargs):
         """Log security/DID-related messages"""
         self.logger.info(f"🔐 {self._truncate_message(message)}")
@@ -172,6 +177,7 @@ def get_logger(name: str = "brain_sdk") -> BrainLogger:
     if _global_logger is None:
         _global_logger = BrainLogger(name)
     return _global_logger
+
 
 def set_log_level(level: str):
     """Set log level for the global logger at runtime (e.g., 'DEBUG', 'INFO', 'WARN', 'ERROR')"""

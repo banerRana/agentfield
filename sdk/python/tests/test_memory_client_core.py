@@ -82,7 +82,9 @@ async def test_get_decodes_json_payload(memory_client, monkeypatch):
             return DummyResponse(200, {"data": json_module.dumps({"count": 1})})
 
     json_module = json
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient())
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient()
+    )
 
     result = await memory_client.get("stats")
 
@@ -104,7 +106,9 @@ async def test_get_returns_default_on_404(memory_client, monkeypatch):
         async def request(self, method, url, json=None, headers=None, timeout=None):  # type: ignore[override]
             return DummyResponse(404, {})
 
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient())
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient()
+    )
 
     result = await memory_client.get("missing", default="fallback")
     assert result == "fallback"
@@ -128,7 +132,9 @@ async def test_delete_uses_delete_endpoint(memory_client, monkeypatch):
             captured["json"] = json
             return DummyResponse()
 
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient())
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient()
+    )
 
     await memory_client.delete("temp")
 
@@ -152,7 +158,9 @@ async def test_list_keys_returns_names(memory_client, monkeypatch):
             keys = [{"key": "a"}, {"key": "b"}]
             return DummyResponse(200, keys)
 
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient())
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *args, **kwargs: DummyAsyncClient()
+    )
 
     result = await memory_client.list_keys("session")
     assert result == ["a", "b"]
@@ -313,7 +321,9 @@ async def test_async_request_falls_back_to_requests(memory_client, monkeypatch):
 
     monkeypatch.setattr("requests.request", fake_request)
 
-    response = await memory_client._async_request("GET", "http://example.com", params={"a": 1})
+    response = await memory_client._async_request(
+        "GET", "http://example.com", params={"a": 1}
+    )
 
     assert isinstance(response, DummyResponse)
     assert calls["method"] == "GET"
@@ -323,7 +333,9 @@ async def test_async_request_falls_back_to_requests(memory_client, monkeypatch):
 
 @pytest.mark.unit
 def test_scoped_on_change_without_events(memory_client):
-    scoped = ScopedMemoryClient(memory_client, scope="session", scope_id="abc", event_client=None)
+    scoped = ScopedMemoryClient(
+        memory_client, scope="session", scope_id="abc", event_client=None
+    )
 
     @scoped.on_change("*")
     def handler():

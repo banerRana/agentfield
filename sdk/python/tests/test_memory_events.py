@@ -27,7 +27,9 @@ def test_event_subscription_matches_scoped_event():
     sub = EventSubscription(["cart.*"], lambda e: None, scope="session", scope_id="s1")
     assert sub.matches_event(event) is True
 
-    other = MemoryChangeEvent(scope="session", scope_id="s2", key="cart.total", action="set")
+    other = MemoryChangeEvent(
+        scope="session", scope_id="s2", key="cart.total", action="set"
+    )
     assert sub.matches_event(other) is False
 
 
@@ -115,7 +117,9 @@ async def test_memory_event_client_connect_builds_ws_url(monkeypatch):
     monkeypatch.setattr("brain_sdk.memory_events.websockets.connect", fake_connect)
     monkeypatch.setattr(MemoryEventClient, "_listen", fake_listen, raising=False)
 
-    await client.connect(patterns=["cart.*", "order.*"], scope="session", scope_id="abc")
+    await client.connect(
+        patterns=["cart.*", "order.*"], scope="session", scope_id="abc"
+    )
     await asyncio.sleep(0)
 
     assert record["url"].startswith("ws://brain")

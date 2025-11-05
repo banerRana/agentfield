@@ -28,6 +28,9 @@ def test_ai_config_get_litellm_params_uses_overrides_and_prunes_none():
 
 def test_ai_config_safe_prompt_chars_uses_cache():
     cfg = AIConfig()
-    cfg.model_limits_cache["gpt-4o"] = {"context_length": 10000, "max_output_tokens": 1000}
+    cfg.model_limits_cache["gpt-4o"] = {
+        "context_length": 10000,
+        "max_output_tokens": 1000,
+    }
     safe = cfg.get_safe_prompt_chars()
     assert safe > 0

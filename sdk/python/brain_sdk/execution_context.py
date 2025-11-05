@@ -58,11 +58,14 @@ class ExecutionContext:
         The Brain backend issues fresh execution IDs for child nodes.
         """
 
+        parent_execution = self.parent_execution_id or self.execution_id
+
         headers: Dict[str, str] = {
             _RUN_HEADER: self.run_id,
             "X-Workflow-ID": self.workflow_id or self.run_id,
-            _PARENT_EXECUTION_HEADER: self.execution_id,
+            _PARENT_EXECUTION_HEADER: parent_execution,
             _EXECUTION_HEADER: self.execution_id,
+            "X-Workflow-Run-ID": self.run_id,
         }
 
         if self.session_id:
@@ -107,6 +110,13 @@ class ExecutionContext:
             parent_workflow_id=self.workflow_id,
             root_workflow_id=self.root_workflow_id or self.workflow_id,
         )
+
+    def create_child_context(self) -> "ExecutionContext":
+        """
+        Backwards-compatible wrapper returning a derived child context.
+        """
+
+        return self.child_context()
 
     # ------------------------------------------------------------------
     # Factories
@@ -160,7 +170,9 @@ class ExecutionContext:
         )
 
     @classmethod
-    def new_root(cls, agent_node_id: str, reasoner_name: str = "root") -> "ExecutionContext":
+    def new_root(
+        cls, agent_node_id: str, reasoner_name: str = "root"
+    ) -> "ExecutionContext":
         """Create a brand-new root execution context for manual invocation."""
 
         from .agent_registry import get_current_agent_instance
@@ -192,8 +204,8 @@ class ExecutionContextManager:
     """Async-safe access to the current execution context."""
 
     def __init__(self) -> None:
-        self._context_var: contextvars.ContextVar[Optional[ExecutionContext]] = contextvars.ContextVar(
-            "execution_context", default=None
+        self._context_var: contextvars.ContextVar[Optional[ExecutionContext]] = (
+            contextvars.ContextVar("execution_context", default=None)
         )
 
     def get_current_context(self) -> Optional[ExecutionContext]:

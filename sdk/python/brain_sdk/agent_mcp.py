@@ -1,6 +1,4 @@
 import asyncio
-import json
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -12,13 +10,12 @@ from brain_sdk.mcp_client import MCPClientRegistry
 from brain_sdk.mcp_manager import MCPManager
 from brain_sdk.types import AgentStatus, MCPServerHealth
 from fastapi import Request
-from pydantic import BaseModel
 
 
 class AgentMCP:
     """
     MCP Management handler for Agent class.
-    
+
     This class encapsulates all MCP-related functionality including:
     - Agent directory detection
     - MCP server lifecycle management
@@ -29,7 +26,7 @@ class AgentMCP:
     def __init__(self, agent_instance):
         """
         Initialize the MCP handler with a reference to the agent instance.
-        
+
         Args:
             agent_instance: The Agent instance this handler belongs to
         """
@@ -71,7 +68,7 @@ class AgentMCP:
     async def initialize_mcp(self):
         """
         Initialize MCP management components.
-        
+
         This method combines the MCP initialization logic that was previously
         scattered in the Agent.__init__ method.
         """
@@ -85,7 +82,9 @@ class AgentMCP:
 
             # Initialize Dynamic Skill Manager when both MCP components are available
             if self.agent.mcp_manager and self.agent.mcp_client_registry:
-                self.agent.dynamic_skill_manager = DynamicMCPSkillManager(self.agent, self.agent.dev_mode)
+                self.agent.dynamic_skill_manager = DynamicMCPSkillManager(
+                    self.agent, self.agent.dev_mode
+                )
                 if self.agent.dev_mode:
                     log_info("Dynamic MCP skill manager initialized")
 
@@ -158,12 +157,16 @@ class AgentMCP:
                         # Stop all running servers
                         for alias in running_servers:
                             try:
-                                if self.agent.mcp_manager:  # Double-check before each call
+                                if (
+                                    self.agent.mcp_manager
+                                ):  # Double-check before each call
                                     await self.agent.mcp_manager.stop_server(alias)
                                     if self.agent.dev_mode:
                                         health = all_status.get(alias, {})
                                         pid = health.get("pid") or "N/A"
-                                        log_info(f"Stopped MCP server: {alias} (PID: {pid})")
+                                        log_info(
+                                            f"Stopped MCP server: {alias} (PID: {pid})"
+                                        )
                             except Exception as e:
                                 if self.agent.dev_mode:
                                     log_error(f"Failed to stop MCP server {alias}: {e}")
@@ -184,6 +187,7 @@ class AgentMCP:
                 loop = asyncio.get_running_loop()
                 # If we're in a loop, create a task and store reference to prevent warning
                 task = loop.create_task(async_cleanup())
+
                 # Add a done callback to handle any exceptions and suppress warnings
                 def handle_task_completion(t):
                     try:
@@ -192,9 +196,10 @@ class AgentMCP:
                     except Exception:
                         # Suppress any callback exceptions to prevent warnings
                         pass
+
                 task.add_done_callback(handle_task_completion)
                 # Store task reference to prevent garbage collection warning
-                if not hasattr(self, '_cleanup_tasks'):
+                if not hasattr(self, "_cleanup_tasks"):
                     self._cleanup_tasks = []
                 self._cleanup_tasks.append(task)
             except RuntimeError:
@@ -235,11 +240,6 @@ class AgentMCP:
 
         skill_name = f"{server_alias}_{tool_name}"
         endpoint_path = f"/skills/{skill_name}"
-
-        # Get tool schema for input validation
-        input_schema_data = tool.get("inputSchema", {})
-        properties = input_schema_data.get("properties", {})
-        required = input_schema_data.get("required", [])
 
         # Create a simple input schema - use dict for flexibility
         from pydantic import BaseModel
@@ -295,7 +295,9 @@ class AgentMCP:
             from brain_sdk.execution_context import ExecutionContext
 
             # Extract execution context from request headers
-            execution_context = ExecutionContext.from_request(request, self.agent.node_id)
+            execution_context = ExecutionContext.from_request(
+                request, self.agent.node_id
+            )
 
             # Store current context for use in app.call()
             self.agent._current_execution_context = execution_context
@@ -365,7 +367,7 @@ class AgentMCP:
         # Set function metadata
         mcp_skill_function.__name__ = skill_name
         mcp_skill_function.__doc__ = f"""
-        {tool.get('description', f'MCP tool: {tool_name}')}
+        {tool.get("description", f"MCP tool: {tool_name}")}
         
         This is an auto-generated skill that wraps the '{tool_name}' tool from the '{server_alias}' MCP server.
         
@@ -389,7 +391,9 @@ class AgentMCP:
         @self.agent.post(endpoint_path, response_model=dict)
         async def mcp_skill_endpoint(input_data: Dict[str, Any], request: Request):
             # Extract execution context from request headers
-            execution_context = ExecutionContext.from_request(request, self.agent.node_id)
+            execution_context = ExecutionContext.from_request(
+                request, self.agent.node_id
+            )
 
             # Store current context for use in app.call()
             self.agent._current_execution_context = execution_context
@@ -441,7 +445,10 @@ class AgentMCP:
                     )
 
                     # Try to get tool count if server is running
-                    if server_health.status == "running" and self.agent.mcp_client_registry:
+                    if (
+                        server_health.status == "running"
+                        and self.agent.mcp_client_registry
+                    ):
                         try:
                             client = self.agent.mcp_client_registry.get_client(alias)
                             if client:
@@ -506,7 +513,9 @@ class AgentMCP:
             if self.agent.dynamic_skill_manager:
                 if self.agent.dev_mode:
                     log_info("Registering MCP tools as skills...")
-                await self.agent.dynamic_skill_manager.discover_and_register_all_skills()
+                await (
+                    self.agent.dynamic_skill_manager.discover_and_register_all_skills()
+                )
 
             self.agent._mcp_initialization_complete = True
 

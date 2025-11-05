@@ -8,9 +8,23 @@ tests can choose their own strategy.
 
 from __future__ import annotations
 
-import pytest
+import json
+import os
+import sys
+import types
+import uuid
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
 
-# Network isolation (pytest-socket)
+import pytest
+import respx
+import responses as responses_lib
+from freezegun import freeze_time
+
+from brain_sdk.agent import Agent
+from brain_sdk.types import AIConfig, MemoryConfig
+
+# Optional imports guarded for test envs
 try:
     from pytest_socket import (
         disable_socket,
@@ -22,11 +36,22 @@ except Exception:  # pragma: no cover
     enable_socket = None  # type: ignore
     socket_allow_unix_socket = None  # type: ignore
 
+try:
+    import httpx
+except Exception:  # pragma: no cover
+    httpx = None  # type: ignore[assignment]
+
+try:
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+except Exception:  # pragma: no cover
+    FastAPI = None  # type: ignore[assignment]
+    JSONResponse = None  # type: ignore[assignment]
+
 
 def _network_allowed(node: "pytest.Node") -> bool:
     return bool(
-        node.get_closest_marker("integration")
-        or node.get_closest_marker("mcp")
+        node.get_closest_marker("integration") or node.get_closest_marker("mcp")
     )
 
 
@@ -36,18 +61,12 @@ def _no_network_by_default(request):
 
 
 # HTTPX mocking via respx (assert all mocked by default)
-import respx
-
-
 @pytest.fixture(autouse=True)
 def _respx_mock_by_default(request):
     yield
 
 
 # requests mocking via responses (non-strict by default; socket is already disabled)
-import responses as responses_lib
-
-
 @pytest.fixture(autouse=True)
 def _responses_mock_by_default(request):
     if request.node.get_closest_marker("integration"):
@@ -63,9 +82,6 @@ def _responses_mock_by_default(request):
 
 
 # Deterministic time helper (opt-in)
-from freezegun import freeze_time
-
-
 @pytest.fixture
 def frozen_time():
     """
@@ -73,40 +89,6 @@ def frozen_time():
     """
     with freeze_time("2024-01-01T00:00:00Z"):
         yield
-# ====================== Enhanced Fixtures for Python Brain SDK Tests ======================
-# This section augments the base testing infrastructure with comprehensive fixtures
-# supporting smoke, functional, contract, and unit tests.
-
-
-
-import os
-import sys
-import json
-import uuid
-import types
-import asyncio
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, List, Callable, Tuple, Union, Literal
-
-import pytest
-
-# Optional imports guarded for test envs
-try:
-    import httpx
-except Exception:  # pragma: no cover
-    httpx = None  # type: ignore
-
-try:
-    from fastapi import FastAPI
-    from fastapi.responses import JSONResponse
-except Exception:  # pragma: no cover
-    FastAPI = None  # type: ignore
-
-# Keep existing imports/fixtures at top of file
-# - _no_network_by_default
-# - _respx_mock_by_default
-# - _responses_mock_by_default
-# - frozen_time
 
 
 # ---------------------------- 1) Environment Patch Fixture ----------------------------
@@ -216,7 +198,9 @@ class _FakeLiteLLMModule(types.ModuleType):
     """
 
     class _ModelInfo:
-        def __init__(self, max_tokens: int = 131072, max_output_tokens: Optional[int] = None):
+        def __init__(
+            self, max_tokens: int = 131072, max_output_tokens: Optional[int] = None
+        ):
             self.max_tokens = max_tokens
             self.max_output_tokens = max_output_tokens
 
@@ -237,7 +221,9 @@ class _FakeLiteLLMModule(types.ModuleType):
         return info
 
     # API: token_counter
-    def token_counter(self, messages: Any = None, model: Optional[str] = None, **kwargs) -> int:
+    def token_counter(
+        self, messages: Any = None, model: Optional[str] = None, **kwargs
+    ) -> int:
         if self._token_counter_impl:
             return self._token_counter_impl(messages=messages, model=model, **kwargs)
         # naive default: chars // 4
@@ -267,8 +253,15 @@ class _FakeLiteLLMModule(types.ModuleType):
         return self._completion_response
 
     # Config helpers
-    def _set_model_info(self, model: str, max_tokens: int = 131072, max_output_tokens: Optional[int] = None):
-        self._model_info[model] = self._ModelInfo(max_tokens=max_tokens, max_output_tokens=max_output_tokens)
+    def _set_model_info(
+        self,
+        model: str,
+        max_tokens: int = 131072,
+        max_output_tokens: Optional[int] = None,
+    ):
+        self._model_info[model] = self._ModelInfo(
+            max_tokens=max_tokens, max_output_tokens=max_output_tokens
+        )
 
     def _set_completion_response(self, response: Any):
         self._completion_response = response
@@ -292,9 +285,15 @@ class LiteLLMMockController:
         set_completion_error(exception)
         set_token_counter(func)
     """
+
     module: _FakeLiteLLMModule
 
-    def set_model_info(self, model: str, max_tokens: int = 131072, max_output_tokens: Optional[int] = None):
+    def set_model_info(
+        self,
+        model: str,
+        max_tokens: int = 131072,
+        max_output_tokens: Optional[int] = None,
+    ):
         self.module._set_model_info(model, max_tokens, max_output_tokens)
 
     def set_completion_response(self, response: Any):
@@ -331,17 +330,15 @@ def litellm_mock(monkeypatch) -> LiteLLMMockController:
     fake = _FakeLiteLLMModule()
     # If real litellm is present, we still shadow it within this test scope
     monkeypatch.setitem(sys.modules, "litellm", fake)
+
     # Also shadow the symbol imported as: from litellm import completion as litellm_completion
     def _completion_alias(**kwargs):
         return fake.completion(**kwargs)
+
     monkeypatch.setitem(sys.modules, "litellm.completion", _completion_alias)  # type: ignore
 
     return LiteLLMMockController(module=fake)
 
-
-# ---------------------------- 3) Enhanced HTTP Mocks ----------------------------
-import respx
-import responses as responses_lib
 
 class BrainHTTPMocks:
     """
@@ -366,47 +363,83 @@ class BrainHTTPMocks:
         self.api_base = f"{self.base_url}/api/v1"
 
     # ----- Nodes -----
-    def mock_register_node(self, status: int = 201, json: Optional[Dict[str, Any]] = None):
+    def mock_register_node(
+        self, status: int = 201, json: Optional[Dict[str, Any]] = None
+    ):
         url = f"{self.api_base}/nodes/register"
 
         # httpx mock
-        respx.post(url).mock(return_value=httpx.Response(status_code=status, json=json or {}))  # type: ignore
+        respx.post(url).mock(
+            return_value=httpx.Response(status_code=status, json=json or {})
+        )  # type: ignore
 
         # requests mock
         responses_lib.add(responses_lib.POST, url, json=json or {}, status=status)
 
-    def mock_update_health(self, node_id: str, status: int = 200, json: Optional[Dict[str, Any]] = None):
+    def mock_update_health(
+        self, node_id: str, status: int = 200, json: Optional[Dict[str, Any]] = None
+    ):
         url = f"{self.api_base}/nodes/{node_id}/health"
-        respx.put(url).mock(return_value=httpx.Response(status_code=status, json=json or {}))  # type: ignore
+        respx.put(url).mock(
+            return_value=httpx.Response(status_code=status, json=json or {})
+        )  # type: ignore
         responses_lib.add(responses_lib.PUT, url, json=json or {}, status=status)
 
     def mock_heartbeat(self, node_id: str, status: int = 200):
         url = f"{self.api_base}/nodes/{node_id}/heartbeat"
-        respx.post(url).mock(return_value=httpx.Response(status_code=status, json={"ok": True}))  # type: ignore
+        respx.post(url).mock(
+            return_value=httpx.Response(status_code=status, json={"ok": True})
+        )  # type: ignore
         responses_lib.add(responses_lib.POST, url, json={"ok": True}, status=status)
 
     # ----- Execute -----
-    def mock_execute(self, target: str, status: int = 200, json: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None):
+    def mock_execute(
+        self,
+        target: str,
+        status: int = 200,
+        json: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ):
         url = f"{self.api_base}/execute/{target}"
-        respx.post(url).mock(return_value=httpx.Response(status_code=status, json=json or {"result": {}}, headers=headers or {}))  # type: ignore
-        responses_lib.add(responses_lib.POST, url, json=json or {"result": {}}, status=status, headers=headers or {})
+        respx.post(url).mock(
+            return_value=httpx.Response(
+                status_code=status, json=json or {"result": {}}, headers=headers or {}
+            )
+        )  # type: ignore
+        responses_lib.add(
+            responses_lib.POST,
+            url,
+            json=json or {"result": {}},
+            status=status,
+            headers=headers or {},
+        )
 
     # ----- Memory -----
     def mock_memory_get(self, result: Any, status: int = 200):
         url = f"{self.api_base}/memory/get"
         payload = result if isinstance(result, dict) else {"data": result}
-        respx.post(url).mock(return_value=httpx.Response(status_code=status, json=payload))  # type: ignore
+        respx.post(url).mock(
+            return_value=httpx.Response(status_code=status, json=payload)
+        )  # type: ignore
         responses_lib.add(responses_lib.POST, url, json=payload, status=status)
 
     def mock_memory_delete(self, status: int = 200):
         url = f"{self.api_base}/memory/delete"
-        respx.delete(url).mock(return_value=httpx.Response(status_code=status, json={"ok": True}))  # type: ignore
+        respx.delete(url).mock(
+            return_value=httpx.Response(status_code=status, json={"ok": True})
+        )  # type: ignore
         responses_lib.add(responses_lib.DELETE, url, json={"ok": True}, status=status)
 
     def mock_memory_list(self, keys: List[str], status: int = 200):
         url = f"{self.api_base}/memory/list"
-        respx.get(url).mock(return_value=httpx.Response(status_code=status, json=[{"key": k} for k in keys]))  # type: ignore
-        responses_lib.add(responses_lib.GET, url, json=[{"key": k} for k in keys], status=status)
+        respx.get(url).mock(
+            return_value=httpx.Response(
+                status_code=status, json=[{"key": k} for k in keys]
+            )
+        )  # type: ignore
+        responses_lib.add(
+            responses_lib.GET, url, json=[{"key": k} for k in keys], status=status
+        )
 
 
 @pytest.fixture
@@ -428,9 +461,6 @@ def http_mocks() -> BrainHTTPMocks:
 
 
 # ---------------------------- 4) Sample Agent Fixture ----------------------------
-from brain_sdk.agent import Agent
-from brain_sdk.types import AIConfig, MemoryConfig
-
 @pytest.fixture
 def sample_ai_config() -> AIConfig:
     """
@@ -465,7 +495,9 @@ def mock_container_detection(monkeypatch):
     from brain_sdk import agent as agent_mod
 
     def _apply(is_container: bool = False):
-        monkeypatch.setattr(agent_mod, "_is_running_in_container", lambda: is_container, raising=True)
+        monkeypatch.setattr(
+            agent_mod, "_is_running_in_container", lambda: is_container, raising=True
+        )
 
     return _apply
 
@@ -484,14 +516,20 @@ def mock_ip_detection(monkeypatch):
     from brain_sdk import agent as agent_mod
 
     def _apply(container_ip: Optional[str] = None, local_ip: Optional[str] = None):
-        monkeypatch.setattr(agent_mod, "_detect_container_ip", lambda: container_ip, raising=True)
-        monkeypatch.setattr(agent_mod, "_detect_local_ip", lambda: local_ip, raising=True)
+        monkeypatch.setattr(
+            agent_mod, "_detect_container_ip", lambda: container_ip, raising=True
+        )
+        monkeypatch.setattr(
+            agent_mod, "_detect_local_ip", lambda: local_ip, raising=True
+        )
 
     return _apply
 
 
 @pytest.fixture
-def sample_agent(env_patch, mock_container_detection, mock_ip_detection, sample_ai_config) -> Agent:
+def sample_agent(
+    env_patch, mock_container_detection, mock_ip_detection, sample_ai_config
+) -> Agent:
     """
     Constructs an Agent instance without serving (no network side-effects).
     - dev_mode=True
@@ -516,7 +554,9 @@ def sample_agent(env_patch, mock_container_detection, mock_ip_detection, sample_
         brain_server="http://localhost:8080",
         version="0.0.0",
         ai_config=sample_ai_config,
-        memory_config=MemoryConfig(auto_inject=[], memory_retention="session", cache_results=False),
+        memory_config=MemoryConfig(
+            auto_inject=[], memory_retention="session", cache_results=False
+        ),
         dev_mode=True,
         callback_url="http://agent.local",  # resolved to http://agent.local:8000 in __init__
     )
@@ -558,7 +598,9 @@ def fake_server(monkeypatch, request):
     @app.post("/api/v1/nodes/register")
     async def register_node(payload: Dict[str, Any]):
         # Minimal 201 response for contract expectations
-        return JSONResponse(status_code=201, content={"ok": True, "node": payload.get("id")})
+        return JSONResponse(
+            status_code=201, content={"ok": True, "node": payload.get("id")}
+        )
 
     @app.post("/api/v1/execute/{target}")
     async def execute_target(target: str, payload: Dict[str, Any]):
@@ -581,7 +623,14 @@ def fake_server(monkeypatch, request):
         if key in memory_store:
             data = memory_store[key]
             # Match SDK client expectations (it decodes "data")
-            return JSONResponse(status_code=200, content={"data": json.dumps(data) if not isinstance(data, (dict, list)) else data})
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "data": json.dumps(data)
+                    if not isinstance(data, (dict, list))
+                    else data
+                },
+            )
         return JSONResponse(status_code=404, content={"error": "not_found"})
 
     @app.delete("/api/v1/memory/delete")
@@ -593,7 +642,9 @@ def fake_server(monkeypatch, request):
     @app.get("/api/v1/memory/list")
     async def memory_list(scope: Optional[str] = None):
         # Scope is ignored in this simple fake; return all keys
-        return JSONResponse(status_code=200, content=[{"key": k} for k in sorted(memory_store.keys())])
+        return JSONResponse(
+            status_code=200, content=[{"key": k} for k in sorted(memory_store.keys())]
+        )
 
     # httpx ASGI transport plumbing
     transport = httpx.ASGITransport(app=app)
@@ -629,9 +680,6 @@ def fake_server(monkeypatch, request):
 
 
 # ---------------------------- Additional lightweight helpers ----------------------------
-import pytest
-
-
 @pytest.fixture
 def env_vars(monkeypatch: pytest.MonkeyPatch):
     """Simple helper to apply environment overrides inside a test. Pass keyword arguments with values or None to unset."""
@@ -656,11 +704,10 @@ def dummy_headers():
     }
 
 
-
 @pytest.fixture
 def responses(request):
     """Compat shim so tests can request a `responses` fixture for manual expectations."""
-    existing = getattr(request.node, '_responses_mock', None)
+    existing = getattr(request.node, "_responses_mock", None)
     if existing is not None:
         yield existing
         return

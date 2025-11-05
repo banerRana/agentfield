@@ -8,7 +8,9 @@ from brain_sdk.agent import Agent
 from brain_sdk.types import AgentStatus
 
 
-async def _wait_for_node(client: httpx.AsyncClient, node_id: str, attempts: int = 40) -> Dict[str, Any]:
+async def _wait_for_node(
+    client: httpx.AsyncClient, node_id: str, attempts: int = 40
+) -> Dict[str, Any]:
     for _ in range(attempts):
         response = await client.get(f"/api/v1/nodes/{node_id}")
         if response.status_code == 200:

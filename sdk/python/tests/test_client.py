@@ -68,7 +68,9 @@ def install_httpx_stub(monkeypatch, *, on_request):
 
     monkeypatch.setitem(sys.modules, "httpx", module)
     client_mod.httpx = module
-    monkeypatch.setattr(client_mod, "_ensure_httpx", lambda force_reload=False: module, raising=False)
+    monkeypatch.setattr(
+        client_mod, "_ensure_httpx", lambda force_reload=False: module, raising=False
+    )
     return module
 
 
@@ -170,7 +172,12 @@ def test_execute_async_uses_httpx(monkeypatch):
                 status_code=202,
             )
         return DummyResponse(
-            {"execution_id": "exec-async", "run_id": "run-123", "status": "succeeded", "result": {"async": True}},
+            {
+                "execution_id": "exec-async",
+                "run_id": "run-123",
+                "status": "succeeded",
+                "result": {"async": True},
+            },
         )
 
     install_httpx_stub(monkeypatch, on_request=on_request)
@@ -202,20 +209,31 @@ async def test_execute_async_falls_back_to_requests(monkeypatch):
     def fake_post(url, json=None, headers=None, timeout=None, **kwargs):
         captured["post"] = headers
         return DummyResponse(
-            {"execution_id": "exec-fallback", "run_id": headers["X-Run-ID"], "status": "queued"},
+            {
+                "execution_id": "exec-fallback",
+                "run_id": headers["X-Run-ID"],
+                "status": "queued",
+            },
             status_code=202,
         )
 
     def fake_get(url, headers=None, timeout=None, **kwargs):
         captured["get"] = headers
         return DummyResponse(
-            {"execution_id": "exec-fallback", "run_id": headers["X-Run-ID"], "status": "succeeded", "result": {"ok": True}}
+            {
+                "execution_id": "exec-fallback",
+                "run_id": headers["X-Run-ID"],
+                "status": "succeeded",
+                "result": {"ok": True},
+            }
         )
 
     import brain_sdk.client as client_mod
 
     client_mod.httpx = None
-    monkeypatch.setattr(client_mod, "_ensure_httpx", lambda force_reload=False: None, raising=False)
+    monkeypatch.setattr(
+        client_mod, "_ensure_httpx", lambda force_reload=False: None, raising=False
+    )
     monkeypatch.setattr(client_mod.requests, "post", fake_post)
     monkeypatch.setattr(client_mod.requests, "get", fake_get)
     monkeypatch.setattr(requests, "post", fake_post)
@@ -249,7 +267,9 @@ async def test_async_heartbeat(monkeypatch):
 
     import brain_sdk.client as client_mod
 
-    monkeypatch.setattr(client_mod.requests, "post", lambda *args, **kwargs: DummyResponse({}, 200))
+    monkeypatch.setattr(
+        client_mod.requests, "post", lambda *args, **kwargs: DummyResponse({}, 200)
+    )
 
     client = BrainClient(base_url="http://example.com")
     heartbeat = HeartbeatData(status=AgentStatus.READY, mcp_servers=[], timestamp="now")

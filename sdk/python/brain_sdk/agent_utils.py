@@ -1,10 +1,7 @@
-import json
 import os
 import re
 import socket
 import time
-import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, create_model
@@ -207,7 +204,9 @@ class AgentUtils:
         fields = {}
 
         for prop_name, prop_def in properties.items():
-            prop_type = AgentUtils.map_json_type_to_python(prop_def.get("type", "string"))
+            prop_type = AgentUtils.map_json_type_to_python(
+                prop_def.get("type", "string")
+            )
             is_required = prop_name in required
 
             if is_required:
@@ -249,12 +248,15 @@ class AgentUtils:
     def serialize_result(result: Any) -> Any:
         """Convert complex objects to JSON-serializable format"""
         try:
-            if hasattr(result, 'model_dump'):  # Pydantic v2
+            if hasattr(result, "model_dump"):  # Pydantic v2
                 return result.model_dump()
-            elif hasattr(result, 'dict'):  # Pydantic v1
+            elif hasattr(result, "dict"):  # Pydantic v1
                 return result.model_dump()
-            elif hasattr(result, '__dict__'):  # Regular objects with attributes
-                return {k: AgentUtils.serialize_result(v) for k, v in result.__dict__.items()}
+            elif hasattr(result, "__dict__"):  # Regular objects with attributes
+                return {
+                    k: AgentUtils.serialize_result(v)
+                    for k, v in result.__dict__.items()
+                }
             elif isinstance(result, (list, tuple)):
                 return [AgentUtils.serialize_result(item) for item in result]
             elif isinstance(result, dict):
@@ -262,6 +264,6 @@ class AgentUtils:
             else:
                 # Primitive types (str, int, float, bool, None) are already JSON-serializable
                 return result
-        except Exception as e:
+        except Exception:
             # Fallback: convert to string if serialization fails
             return str(result)
