@@ -252,32 +252,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-import glob
-import json
-import os
-import shutil
+          if compgen -G "dist/artifacts-*.json" >/dev/null; then
+            jq -s 'add' dist/artifacts-*.json > dist/artifacts.json
+          fi
 
-artifacts = []
-for path in sorted(glob.glob('dist/artifacts-*.json')):
-    with open(path, 'r', encoding='utf-8') as handle:
-        artifacts.extend(json.load(handle))
-if artifacts:
-    with open('dist/artifacts.json', 'w', encoding='utf-8') as handle:
-        json.dump(artifacts, handle)
+          for suffix in linux darwin windows; do
+            if [ -f "dist/metadata-${suffix}.json" ]; then
+              cp "dist/metadata-${suffix}.json" dist/metadata.json
+              break
+            fi
+          done
 
-# Prefer linux metadata/config, fall back to others if needed
-for suffix in ('linux', 'darwin', 'windows'):
-    meta_path = f'dist/metadata-{suffix}.json'
-    if os.path.exists(meta_path):
-        shutil.copy(meta_path, 'dist/metadata.json')
-        break
-for suffix in ('linux', 'darwin', 'windows'):
-    cfg_path = f'dist/config-{suffix}.yaml'
-    if os.path.exists(cfg_path):
-        shutil.copy(cfg_path, 'dist/config.yaml')
-        break
-PY
+          for suffix in linux darwin windows; do
+            if [ -f "dist/config-${suffix}.yaml" ]; then
+              cp "dist/config-${suffix}.yaml" dist/config.yaml
+              break
+            fi
+          done
 
       - name: Run GoReleaser release
         uses: goreleaser/goreleaser-action@v6
