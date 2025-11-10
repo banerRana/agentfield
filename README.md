@@ -2,16 +2,18 @@
 
 <img src="assets/github.png" alt="AgentField - Kubernetes, for AI Agents" width="100%" />
 
-**A Kubernetes-style control plane that runs AI agents like microservices: REST/gRPC APIs, async webhooks, and cryptographic identity for every agent and execution.**
+### Kubernetes for AI Agents — **Deploy, Scale, Observe, and Prove**
 
-Write agents. AgentField deploys, scales, observes, and proves what happened.
+Open-source (Apache-2.0) **control plane** that runs AI agents like microservices.
+Every agent gets **REST/gRPC APIs**, **async execution & webhooks**, **built-in observability**, and **cryptographic identity & audit**.
+
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev/)
 [![Python](https://img.shields.io/badge/python-3.9+-3776AB.svg)](https://www.python.org/)
 [![Deploy with Docker](https://img.shields.io/badge/deploy-docker-2496ED.svg)](https://docs.docker.com/)
 
-**[📚 Docs](https://agentfield.ai/docs)** • **[⚡ Quickstart](#-try-agentfield-in-2-minutes)**
+**[📚 Docs](https://agentfield.ai/docs)** • **[⚡ Quickstart](#quickstart-in-60-seconds)** • **[🧠 Why AgentField](#why-agentfield)**
 
 </div>
 
@@ -21,31 +23,12 @@ Write agents. AgentField deploys, scales, observes, and proves what happened.
 
 - **Write agents in Python/Go** (or any language via REST/gRPC)
 - **Deploy independently** like microservices—zero coordination between teams
-- **Get production infrastructure automatically**: REST APIs, streaming, async queues, observability, cryptographic audit trails
+- **Get production infrastructure automatically**: IAM, REST APIs, streaming, async queues, observability, cryptographic audit trails
 - **Run anywhere**: local dev, Docker, Kubernetes, cloud
 
 ```bash
 curl -fsSL https://agentfield.ai/install.sh | bash && af init my-agents
 ```
-
----
-
-## 📦 Installation
-
-**macOS & Linux:**
-```bash
-curl -fsSL https://agentfield.ai/install.sh | bash
-```
-
-Verify installation:
-```bash
-agentfield --version
-```
-
-The installer automatically detects your platform and sets everything up. No sudo required.
-
-**Need help?** [📚 Installation docs](https://agentfield.ai/docs/installation)
-
 ---
 
 ## 🚀 Try AgentField in 2 Minutes
@@ -71,12 +54,6 @@ cd agentfield && docker compose up
 Your control plane is running at `http://localhost:8080`
 
 **[📚 Full quickstart guide →](https://agentfield.ai/docs/quick-start)**
-
----
-
-## Hello, Agent (20 lines)
-
-Write your first agent—automatically get a REST API:
 
 ```python
 from agentfield import Agent
@@ -110,11 +87,9 @@ curl -X POST http://localhost:8080/api/v1/execute/greeting-agent.say_hello \
 **You automatically get:**
 - ✅ REST API at `/execute/greeting-agent.say_hello` (OpenAPI spec at `/openapi.yaml`)
 - ✅ Async execution: `/execute/async/...` with webhook callbacks (HMAC-signed)
-- ✅ Health checks: `/health/live` and `/health/ready` (Kubernetes-ready)
-- ✅ Prometheus metrics: `/metrics` labeled by agent, version, and run_id
-- ✅ Workflow DAG in UI (visual trace of execution)
+- ✅ Prometheus metrics: `/metrics`
+- ✅ Workflow Observability
 
-**That's it.** One function = production-ready service.
 
 **[📚 Docs](https://agentfield.ai/docs)** • **[⚡ More examples](https://github.com/agentfield/agentfield-examples)**
 
@@ -126,16 +101,14 @@ Agent frameworks are great for **prototypes**. AgentField builds agents **and** 
 
 ### What Hurts Today → What AgentField Does Automatically
 
-| 🔴 **Without AgentField**                                                                                         | 🟢 **With AgentField**                                                                                                                                           |
-| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Monolithic deployments** — one team's change forces everyone to redeploy                                  | **Independent deployment** — teams ship agents on their own schedule, zero coordination                                                                    |
-| **No native APIs** — your React app needs custom wrappers to call agents                                    | **REST & OpenAPI by default** (gRPC optional) — every function is an endpoint, auto-documented                                                             |
-| **Manual orchestration** — you build queues, state management, agent coordination from scratch              | **Auto-orchestration** — agents call each other, workflows track automatically, shared memory (Global/Agent/Session/Run scopes) syncs state                |
-| **No observability** — grep logs from 5 services to debug multi-agent flows                                 | **Built-in observability** — workflow DAGs (UI), execution traces, agent notes, Prometheus metrics (`/metrics` per agent, labeled by agent/version/run_id) |
-| **DIY infrastructure** — you're building webhooks, SSE, async queues, health checks, retries yourself       | **Production infrastructure** — durable queues, webhook delivery (HMAC-signed), SSE streaming, graceful shutdown, K8s-ready health checks                  |
-| **No identity or audit** — logs can be edited, screenshots faked, compliance teams need cryptographic proof | **Cryptographic identity** — W3C DIDs (`did:web` or `did:key`) for every agent, W3C Verifiable Credentials (JSON-LD) for tamper-proof audit trails         |
-
-### The Analogy
+| 🔴 **Without AgentField**                                      | 🟢 **With AgentField**                                                                      |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Monolithic deploys** — one team's change redeploys everyone | **Independent deploys** — each agent ships on its own schedule; control plane coordinates  |
+| **DIY orchestration** — queues, async, webhooks, state        | **Built-in orchestration** — durable queues, async + webhooks, shared memory scopes        |
+| **No observability** — grep logs across services              | **Auto-observability** — workflow DAGs, Prometheus metrics, structured logs                |
+| **No identity/audit** — logs can be edited                    | **Cryptographic proof** — DIDs per agent, Verifiable Credentials per execution             |
+| **Fragile communication** — discovery/routing by hand         | **Auto-discovery & context propagation** — `await agent.call("other-agent.fn")`, zero glue |
+| **Ad-hoc APIs** — custom wrappers for frontends               | **REST/OpenAPI by default** — every reasoner is an endpoint (gRPC optional)                |
 
 ```
 Traditional Frameworks = Flask (single app)
@@ -148,208 +121,90 @@ Bring your own model/tooling; AgentField handles runtime, scale, and proof.
 
 ---
 
-## ⚡ 30-Second Multi-Agent Demo
+What You Get Out-of-the-Box
 
-**The scenario:** Customer support system with 3 coordinating agents.
+🧩 Scale Infrastructure — deploy like microservices
+	•	Durable queues, async webhooks, event streaming
+	•	Auto-discovery & cross-agent calls; context propagation
+	•	Horizontal scaling & many more..!
 
-```python
-from agentfield import Agent
+🔐 Trust & Governance — cryptographic proof for every decision
+	•	W3C IDs & Verifiable Credentials
+	•	Tamper-proof audit trails; runtime policy enforcement
+	•	Offline verification for auditors
 
-# Agent 1: Support orchestrator (Team: Customer Success)
-support = Agent("support-agent")
+🛰 Production Hardening — observability & reliability built in
+	•	Auto-generated workflow DAGs
+	•	Prometheus metrics, structured logs
+	•	Graceful shutdowns, retries, zero-config memory
 
-@support.reasoner()
-async def handle_ticket(ticket: dict) -> dict:
-    # Call Agent 2 (different service, different team)
-    sentiment = await support.call("sentiment-agent.analyze",
-                                    text=ticket["message"])
-
-    # Call Agent 3 (knowledge base, Data team)
-    solutions = await support.call("kb-agent.search",
-                                    query=ticket["issue"])
-
-    # Conditional escalation
-    if sentiment["urgency"] == "high":
-        await support.call("escalation-agent.create_case", ticket=ticket)
-
-    return {"solutions": solutions, "sentiment": sentiment}
-```
-
-**Deploy:**
-```bash
-af server           # Start control plane
-af run           # Deploy your agent
-```
-
-**You get automatically:**
-- ✅ REST API: `POST /execute/support-agent.handle_ticket`
-- ✅ Async execution: `POST /execute/async/...` with webhooks (HMAC-signed, 6 retry attempts with exponential backoff)
-- ✅ Real-time streaming (SSE): Your frontend gets live updates as the workflow executes
-- ✅ Workflow DAG: Visual graph showing which agent called which (auto-generated in UI)
-- ✅ Shared memory: All 3 agents access the same state (Global/Agent/Session/Run scopes, automatic)
-- ✅ Observability: Prometheus metrics (`/metrics`), execution traces, agent notes
-- ✅ Identity: Cryptographic proof of every decision (W3C DIDs + Verifiable Credentials)
-- ✅ Health checks, Docker/K8s ready, horizontal scaling
-
-**From your React app:**
-```javascript
-// Call agents via REST API (no custom SDK needed)
-const response = await fetch('http://agentfield:8080/api/v1/execute/support-agent.handle_ticket', {
-  method: 'POST',
-  body: JSON.stringify({ input: { ticket: {...} } })
-});
-
-// Stream real-time updates
-const eventSource = new EventSource(
-  `http://agentfield:8080/api/v1/workflows/runs/${runId}/events/stream`
-);
-eventSource.onmessage = (e) => {
-  console.log('Agent update:', JSON.parse(e.data));
-};
-```
-
-**🎨 UI SCREENSHOT #1 (HERO): Add here**
-> **What to show:** Workflow DAG visualization from the AgentField UI showing the 3 agents (support-agent → sentiment-agent, support-agent → kb-agent, support-agent → escalation-agent) with execution times, status indicators (green checkmarks), and the visual graph. This is the "wow" moment that shows developers the automatic observability.
->
-> **Recommended dimensions:** 1200x700px, annotate with arrows pointing to: "Auto-generated DAG", "Execution times", "Agent-to-agent calls"
-
-**Scale individual agents:**
-```bash
-kubectl scale deployment sentiment-agent --replicas=10
-# Other agents unaffected
-```
-
-### That's the difference.
-
-AgentField **is** the infrastructure you'd otherwise spend 3 months building.
-
----
-
-## Three Pillars: What You Get Out of the Box
-
-### 🔧 Runtime & APIs
-
-**Deploy AI agents like microservices—independent, discoverable, language-agnostic.**
-
-| Feature                                       | What It Does                                                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **REST & OpenAPI by default** (gRPC optional) | Every agent function becomes an endpoint automatically                                                  |
-| **Real-time streaming (SSE)**                 | Frontends get live updates as workflows execute; see [React example](#real-time-streaming)              |
-| **Async execution**                           | Long-running tasks (5+ min) run in durable queues; webhook callbacks when done (HMAC-signed, 6 retries) |
-| **Agent-to-agent calls**                      | `await agent.call("other-agent.function")` — control plane routes automatically                         |
-| **Shared memory**                             | Zero-config state: Global → Agent → Session → Run scopes (automatic syncing)                            |
-| **Language-agnostic**                         | Python SDK, Go SDK, or implement REST/gRPC protocol directly in any language                            |
-
-...and many more !
-
-**📚 [Runtime docs →](https://agentfield.ai/docs/runtime)**
-
-### 📊 Scale & Ops
-
-**Production-grade observability, scaling, and reliability—no instrumentation required.**
-
-| Feature                | What It Does                                                                                                                                                                                             |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Workflow DAGs**      | Visual execution graphs (auto-generated in UI); see exactly which agent called which and when                                                                                                            |
-| **Prometheus metrics** | Automatic `/metrics` endpoint per agent and control plane, labeled by `agent`, `version`, `run_id`; request rates, latencies, errors (injected via control plane proxy—agents need zero instrumentation) |
-| **Durable queues**     | PostgreSQL `FOR UPDATE SKIP LOCKED` lease-based processing; survives crashes, fair scheduling, backpressure                                                                                              |
-| **Health checks**      | `/health/live` and `/health/ready` for Kubernetes liveness/readiness probes                                                                                                                              |
-| **Horizontal scaling** | Stateless control plane scales horizontally; scale individual agent nodes independently (`kubectl scale deployment my-agent --replicas=10`)                                                              |
-| **Graceful shutdown**  | Completes in-flight work before exit; no dropped tasks                                                                                                                                                   |
-| **Auto-retries**       | Failed executions retry with exponential backoff (configurable)                                                                                                                                          |
-
-**How Prometheus metrics are injected:** The control plane acts as a reverse proxy for agent traffic. All agent-to-agent calls and executions flow through the control plane, which records latency, error rates, and throughput **without requiring agents to instrument their code**. Metrics are exposed at `/metrics` in Prometheus format.
-
-**📚 [Scale & ops docs →](https://agentfield.ai/docs/observability)**
-
-### 🔒 Identity & Audit
-
-**Cryptographic proof for compliance—tamper-proof, exportable, verifiable offline.**
-
-| Feature                        | What It Does                                                                                                           |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| **W3C DIDs**                   | Every agent gets a Decentralized Identifier (`did:web` or `did:key`); cryptographic identity for non-repudiation       |
-| **W3C Verifiable Credentials** | Opt-in per agent; each execution generates a VC (JSON-LD format) with signed input/output hashes                       |
-| **Tamper-proof audit trails**  | Export full VC chains for regulators; verify offline with `af verify audit.json` (no access to your systems needed) |
-| **Non-repudiation**            | Agents cryptographically sign decisions; can't deny their actions                                                      |
-| **Policy engine**              | Define rules for which executions require VCs (e.g., "all financial decisions > $10K")                                 |
-| **Export formats**             | W3C VC JSON-LD (standard); import into compliance tools                                                                |
-
-**Example: Enable for a specific agent**
-```python
-# Opt-in per agent (not all agents need VCs)
-if app.vc_generator:
-    app.vc_generator.set_enabled(True)
-
-@app.reasoner()
-async def approve_loan(application: dict) -> Decision:
-    decision = await app.ai("Evaluate loan risk", ...)
-    # VC generated automatically with DID signature + input/output hashes
-    return decision
-```
-
-**For auditors/compliance:**
-```bash
-# Export cryptographic proof chain
-curl http://agentfield:8080/api/v1/did/workflow/wf_abc123/vc-chain > audit.json
-
-# Verify offline (no access to your systems needed)
-af vc verify audit.json
-# ✓ All signatures valid (W3C VC spec)
-# ✓ No tampering detected
-# ✓ Complete provenance chain
-```
-
-**🎨 UI SCREENSHOT #2: Add here**
-> **What to show:** AgentField UI showing the DID/VC verification interface. Display a workflow with DIDs for each agent, the VC chain visualization, and the verification status (green checkmarks showing "All signatures valid").
->
-> **Caption:** "W3C DIDs and Verifiable Credentials—tamper-proof audit trails for compliance"
-
-**📚 [Identity & audit docs →](https://agentfield.ai/docs/identity)**
+**Learn more:** [Features](https://agentfield.ai/docs/features) • [Identity & Trust](https://agentfield.ai/docs/why-agentfield/vs-agent-frameworks)
 
 ---
 
 ## 🏗️ Architecture
 
-### Deploy AI Agents Like Kubernetes Deploys Containers
-
-AgentField uses a **two-layer design**: a stateless **control plane** (like K8s control plane) and independent **agent nodes** (like pods):
-
 <div align="center">
-<img src="assets/arch.png" alt="AgentField Architecture - Control Plane and Agent Nodes" width="100%" />
+<img src="assets/arch.png" alt="AgentField Architecture Diagram" width="80%" />
 </div>
-
-
-
-### Think Kubernetes, But for AI
-
-| Kubernetes             | AgentField                 | What It Means                                  |
-| ---------------------- | --------------------- | ---------------------------------------------- |
-| **Pods**               | **Agent Nodes**       | Your AI agent runs in a container              |
-| **Services**           | **Agent Registry**    | Control plane discovers agents automatically   |
-| **kubectl apply**      | **af run**         | Deploy your agent independently                |
-| **Horizontal scaling** | **Scale agent nodes** | Add more replicas per agent                    |
-| **Service mesh**       | **Control plane**     | Automatic routing, observability, state        |
-| **Ingress**            | **API Gateway**       | Every agent function is a REST endpoint        |
-| **Language-agnostic**  | **REST/gRPC API**     | Use Python, Go, Rust, JavaScript, any language |
-
-### How It Works
-
-1. **Write agents in any language** — Python SDK, Go SDK, or raw REST/gRPC
-2. **Deploy as containers** — `docker build` + `af run` or `kubectl apply`
-3. **Control plane orchestrates** — routing, state, workflows, identity, observability
-4. **Agent nodes scale independently** — each team owns their nodes, deploys on their schedule
-5. **Everything auto-coordinates** — agents call each other via control plane, memory syncs, workflows track
-
-**Key Insight:** Each agent is a **microservice**. Teams deploy independently. The control plane makes them coordinate like a single system.
-
-**Language Flexibility:** Use our Python/Go SDKs for convenience, or implement the REST/gRPC protocol directly in any language. The control plane is language-agnostic by design.
-
-**[📚 Detailed architecture docs →](https://agentfield.ai/docs/architecture)**
 
 ---
 
-## When to Use AgentField (And When Not To)
+| Layer         | What It Does                                                  |
+| ------------- | ------------------------------------------------------------- |
+| Control Plane | Stateless Go service; routes, observes, verifies, scales      |
+| Agent Nodes   | Your independent agent microservices (Python/Go/REST/gRPC)    |
+| Interfaces    | Backends via REST; frontends & external APIs via webhooks/SSE |
+
+Each agent is a microservice. Teams deploy independently; the control plane makes them behave as one coherent system.
+
+**More:** [Architecture](https://agentfield.ai/docs/architecture) • [API Reference](https://agentfield.ai/docs/api)
+
+---
+
+## Real-Time & Async
+
+- **Unified API:** `POST /api/v1/execute/{agent.reasoner}`
+- **Async runs:** `/execute/async/...` + signed webhooks
+- **Live streams:** Server-Sent Events (SSE) for real-time output
+- **Auto retries, backpressure, dead-letter queues**
+
+**Docs:** [API Reference](https://agentfield.ai/docs/api) • [Observability](https://agentfield.ai/docs/observability)
+
+---
+
+## Identity & Audit (opt-in per agent)
+
+- DIDs auto-issued for agents (`did:web` / `did:key`)
+- Verifiable Credentials (W3C JSON-LD) for each execution
+- Input/output hashing for proof integrity
+- Offline verification for auditors (`af vc verify audit.json`)
+
+**Docs:** [Identity & Trust](https://agentfield.ai/docs/why-agentfield/vs-agent-frameworks)
+
+---
+
+## Installation
+
+### macOS / Linux
+
+```bash
+curl -fsSL https://agentfield.ai/get | bash
+agentfield --version
+```
+
+### Docker Compose
+
+```bash
+git clone https://github.com/Agent-Field/agentfield
+cd agentfield && docker compose up
+```
+
+**Full guides:** [Installation](https://agentfield.ai/docs/installation) • [Deployment](https://agentfield.ai/docs/deployment)
+
+---
+
+## When to Use (and When Not)
 
 ### ✅ Use AgentField If:
 
@@ -362,7 +217,6 @@ AgentField uses a **two-layer design**: a stateless **control plane** (like K8s 
 
 ### ❌ Start with a Framework If:
 
-- You're **learning agent concepts** and want the simplest possible start (try LangChain or CrewAI first, then migrate to AgentField when you need production features)
 - You're building a **single-agent chatbot** that will never scale beyond one service
 - You don't need REST APIs, observability, or multi-agent coordination
 - You're prototyping and don't plan to deploy to production
@@ -376,42 +230,7 @@ You can start with AgentField and skip migration pain later. Or start with a fra
 
 ---
 
-## 🐳 Deployment
-
-**Local dev:**
-```bash
-af dev && af run
-```
-
-**Docker Compose:**
-```yaml
-services:
-  agentfield-server:
-    image: agentfield/server:latest
-    ports: ["8080:8080"]
-
-  my-agent:
-    build: ./agents/my-agent
-    environment:
-      - AGENTFIELD_SERVER=http://agentfield-server:8080
-```
-
-**Kubernetes:**
-```bash
-kubectl apply -f agentfield-control-plane.yaml
-kubectl apply -f my-agent-deployment.yaml
-kubectl scale deployment my-agent --replicas=10
-```
-
-**Cloud:** Works on Railway, Render, Fly.io, AWS, GCP, Azure
-
-Each agent deploys independently. Control plane coordinates automatically.
-
-**[📚 Full deployment guides →](https://agentfield.ai/docs/deployment)**
-
----
-
-## 🌍 Community & Contributing
+## Community
 
 We're building AgentField in the open. Join us:
 
@@ -425,56 +244,6 @@ Apache 2.0 licensed. Built by developers like you.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 
----
-
-## FAQ
-
-<details>
-<summary><strong>How does auth work? Do agents authenticate?</strong></summary>
-
-Agents authenticate to the control plane via API keys (configurable per environment). The control plane handles all inter-agent routing—agents don't need to authenticate to each other.
-
-For **end-user auth** (e.g., React app calling agents), you can integrate your existing auth system (JWT, OAuth) at the API gateway layer. AgentField respects your auth headers and passes them to agents via context.
-
-**W3C DIDs** are for **identity** (proving which agent made a decision), not access control.
-
-</details>
-
-<details>
-<summary><strong>What's the performance overhead?</strong></summary>
-
-The control plane adds ~5-10ms latency per agent call (routing + state sync). For AI workloads (which take seconds to minutes), this is negligible.
-
-**Prometheus metrics injection** is zero-cost—the control plane already proxies agent traffic, so recording metrics adds no extra network hops.
-
-Benchmark: 10K requests/sec sustained on a single control plane instance (4 cores, 8GB RAM). Horizontal scaling tested to 100K+ req/sec.
-
-</details>
-
-<details>
-<summary><strong>Can I use my own observability stack?</strong></summary>
-
-Yes. AgentField exposes:
-- **Prometheus metrics** at `/metrics` (scrape with your existing Prometheus)
-- **Structured logs** (JSON) to stdout/stderr (ship to your log aggregator)
-- **OpenTelemetry traces** (opt-in, export to Jaeger/Datadog/etc.)
-
-The built-in workflow DAG UI is optional—you can disable it and use your own dashboards.
-
-</details>
-
-<details>
-<summary><strong>Is this vendor-neutral? Can I switch models/providers?</strong></summary>
-
-**100% vendor-neutral.** AgentField is infrastructure, not a model provider.
-
-- Use **any LLM**: OpenAI, Anthropic, local Ollama, Hugging Face, etc.
-- Use **any framework**: Call LangChain, CrewAI, raw model APIs—your choice
-- Use **any language**: Python SDK, Go SDK, or raw REST/gRPC
-
-AgentField handles deployment, orchestration, and observability. You control the AI logic.
-
-</details>
 
 ---
 
