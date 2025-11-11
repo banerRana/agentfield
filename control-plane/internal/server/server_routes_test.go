@@ -310,6 +310,9 @@ func (s *stubStorage) GetWorkflowVC(ctx context.Context, workflowVCID string) (*
 func (s *stubStorage) ListWorkflowVCs(ctx context.Context, workflowID string) ([]*types.WorkflowVCInfo, error) {
 	return nil, nil
 }
+func (s *stubStorage) CountExecutionVCs(ctx context.Context, filters types.VCFilters) (int, error) {
+	return 0, nil
+}
 
 // stubPayloadStore implements services.PayloadStore
 type stubPayloadStore struct{}
