@@ -63,11 +63,11 @@ class TestSkillPydanticModels:
         args, kwargs = convert_function_args(skill_with_model, (), input_dict)
 
         # Verify conversion
-        assert len(args) == 1
-        assert isinstance(args[0], UserRequest)
-        assert args[0].user_id == 123
-        assert args[0].name == "John Doe"
-        assert args[0].email == "john@example.com"
+        assert "request" in kwargs
+        assert isinstance(kwargs["request"], UserRequest)
+        assert kwargs["request"].user_id == 123
+        assert kwargs["request"].name == "John Doe"
+        assert kwargs["request"].email == "john@example.com"
 
     def test_convert_function_args_with_plain_params(self):
         """Test that plain parameters are passed through unchanged."""
