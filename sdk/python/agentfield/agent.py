@@ -30,7 +30,12 @@ from agentfield.agent_server import AgentServer
 from agentfield.agent_workflow import AgentWorkflow
 from agentfield.client import AgentFieldClient
 from agentfield.dynamic_skills import DynamicMCPSkillManager
-from agentfield.execution_context import ExecutionContext, get_current_context
+from agentfield.execution_context import (
+    ExecutionContext,
+    get_current_context,
+    reset_execution_context,
+    set_execution_context,
+)
 from agentfield.did_manager import DIDManager
 from agentfield.vc_generator import VCGenerator
 from agentfield.mcp_client import MCPClientRegistry
@@ -1293,11 +1298,6 @@ class Agent(FastAPI):
     ) -> Any:
         import asyncio
         import time
-        from agentfield.execution_context import (
-            set_execution_context,
-            reset_execution_context,
-        )
-
         execution_context = ExecutionContext.from_request(request, self.node_id)
         payload_dict = input_model.model_dump()
 
@@ -1736,6 +1736,9 @@ class Agent(FastAPI):
 
                 # Store current context for use in app.call()
                 self._current_execution_context = execution_context
+                context_token = None
+                context_token = set_execution_context(execution_context)
+                self._set_as_current()
 
                 # Create DID execution context if DID system is enabled
                 did_execution_context = None
@@ -1753,7 +1756,8 @@ class Agent(FastAPI):
                     )
 
                 # Convert input to function arguments
-                kwargs = input_data.model_dump()
+                input_payload = input_data.model_dump()
+                kwargs = dict(input_payload)
 
                 # Inject execution context if the function accepts it
                 if "execution_context" in sig.parameters:
@@ -1761,35 +1765,102 @@ class Agent(FastAPI):
 
                 # Record start time for VC generation
                 start_time = time.time()
+                handler = getattr(self, "workflow_handler", None)
+                if handler:
+                    execution_context.reasoner_name = skill_id
+                    await handler.notify_call_start(
+                        execution_context.execution_id,
+                        execution_context,
+                        skill_id,
+                        input_payload,
+                        parent_execution_id=execution_context.parent_execution_id,
+                    )
 
                 # 🔥 FIX: Call the original function directly to prevent double tracking
                 # The FastAPI endpoint already handles tracking, so we don't want the tracked wrapper
                 original_func = getattr(func, "_original_func", func)
-                if asyncio.iscoroutinefunction(original_func):
-                    result = await original_func(**kwargs)
-                else:
-                    result = original_func(**kwargs)
+                try:
+                    if asyncio.iscoroutinefunction(original_func):
+                        result = await original_func(**kwargs)
+                    else:
+                        result = original_func(**kwargs)
 
-                # Generate VC asynchronously if DID is enabled
-                if did_execution_context and self._should_generate_vc(
-                    skill_id, self._skill_vc_overrides
-                ):
-                    end_time = time.time()
-                    duration_ms = int((end_time - start_time) * 1000)
-                    asyncio.create_task(
-                        self._generate_vc_async(
-                            self.vc_generator,
-                            did_execution_context,
-                            skill_id,
-                            input_data.model_dump(),
-                            result,
-                            "success",
-                            None,
-                            duration_ms,
+                    duration_ms = int((time.time() - start_time) * 1000)
+
+                    # Generate VC asynchronously if DID is enabled
+                    if did_execution_context and self._should_generate_vc(
+                        skill_id, self._skill_vc_overrides
+                    ):
+                        asyncio.create_task(
+                            self._generate_vc_async(
+                                self.vc_generator,
+                                did_execution_context,
+                                skill_id,
+                                input_payload,
+                                result,
+                                "success",
+                                None,
+                                duration_ms,
+                            )
                         )
-                    )
 
-                return result
+                    if handler:
+                        await handler.notify_call_complete(
+                            execution_context.execution_id,
+                            execution_context.workflow_id,
+                            result,
+                            duration_ms,
+                            execution_context,
+                            input_data=input_payload,
+                            parent_execution_id=execution_context.parent_execution_id,
+                        )
+
+                    return result
+                except asyncio.CancelledError as cancel_err:
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    if handler:
+                        await handler.notify_call_error(
+                            execution_context.execution_id,
+                            execution_context.workflow_id,
+                            "Execution cancelled by upstream client",
+                            duration_ms,
+                            execution_context,
+                            input_data=input_payload,
+                            parent_execution_id=execution_context.parent_execution_id,
+                        )
+                    raise cancel_err
+                except HTTPException as http_exc:
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    detail = getattr(http_exc, "detail", None) or str(http_exc)
+                    if handler:
+                        await handler.notify_call_error(
+                            execution_context.execution_id,
+                            execution_context.workflow_id,
+                            detail,
+                            duration_ms,
+                            execution_context,
+                            input_data=input_payload,
+                            parent_execution_id=execution_context.parent_execution_id,
+                        )
+                    raise
+                except Exception as exc:
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    if handler:
+                        await handler.notify_call_error(
+                            execution_context.execution_id,
+                            execution_context.workflow_id,
+                            str(exc),
+                            duration_ms,
+                            execution_context,
+                            input_data=input_payload,
+                            parent_execution_id=execution_context.parent_execution_id,
+                        )
+                    raise
+                finally:
+                    if context_token is not None:
+                        reset_execution_context(context_token)
+                    self._current_execution_context = None
+                    self._clear_current()
 
             # Register skill metadata
             self.skills.append(
