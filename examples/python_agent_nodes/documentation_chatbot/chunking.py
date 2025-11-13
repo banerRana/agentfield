@@ -23,13 +23,26 @@ def is_supported_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
 
 
+def _sanitize_text(text: str) -> str:
+    """
+    Remove characters that Postgres refuses to store (e.g., null bytes).
+
+    Postgres JSONB/text columns cannot contain literal ``\\x00`` bytes, so strip
+    them up-front before we attempt to store the document in memory.
+    """
+
+    return text.replace("\x00", "")
+
+
 def read_text(path: Path) -> str:
-    """Best-effort UTF-8 reader with fallback to latin-1."""
+    """Best-effort UTF-8 reader with fallback to latin-1 and sanitization."""
 
     try:
-        return path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        return path.read_text(encoding="latin-1")
+        raw = path.read_text(encoding="latin-1")
+
+    return _sanitize_text(raw)
 
 
 @dataclass
