@@ -68,6 +68,10 @@ async def test_memory_round_trip(monkeypatch, dummy_headers):
             self, method, url, json=None, headers=None, params=None, timeout=None
         ):  # type: ignore[override]
             method_upper = method.upper()
+            if url.endswith("/memory/delete"):
+                scope = _scope(json or {})
+                store.get(scope, {}).pop((json or {}).get("key"), None)
+                return DummyAsyncResponse(200, {"ok": True})
             if method_upper == "DELETE":
                 scope = _scope(json or {})
                 store.get(scope, {}).pop((json or {}).get("key"), None)
