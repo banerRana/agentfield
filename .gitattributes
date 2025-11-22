@@ -1,12 +1,6 @@
 # GitHub Linguist Configuration
 # This file controls how GitHub detects and displays repository languages
 
-# Mark Go control plane as vendored to exclude from language stats
-control-plane/** linguist-vendored
-
-# Mark Go SDK as vendored
-sdk/go/** linguist-vendored
-
 # Prioritize Python as the primary language
 sdk/python/** linguist-language=Python
 *.py linguist-language=Python
