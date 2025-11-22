@@ -27,31 +27,31 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Print functions
 print_banner() {
-  echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${CYAN}║${NC}           ${BOLD}AgentField CLI Installer${NC}                        ${CYAN}║${NC}"
-  echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
-  echo ""
+  printf "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}\n"
+  printf "${CYAN}║${NC}           ${BOLD}AgentField CLI Installer${NC}                        ${CYAN}║${NC}\n"
+  printf "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}\n"
+  printf "\n"
 }
 
 print_info() {
-  echo -e "${BLUE}[INFO]${NC} $1"
+  printf "${BLUE}[INFO]${NC} %s\n" "$1"
 }
 
 print_success() {
-  echo -e "${GREEN}[SUCCESS]${NC} $1"
+  printf "${GREEN}[SUCCESS]${NC} %s\n" "$1"
 }
 
 print_error() {
-  echo -e "${RED}[ERROR]${NC} $1" >&2
+  printf "${RED}[ERROR]${NC} %s\n" "$1" >&2
 }
 
 print_warning() {
-  echo -e "${YELLOW}[WARNING]${NC} $1"
+  printf "${YELLOW}[WARNING]${NC} %s\n" "$1"
 }
 
 print_verbose() {
   if [[ "$VERBOSE" == "1" ]]; then
-    echo -e "${CYAN}[VERBOSE]${NC} $1"
+    printf "${CYAN}[VERBOSE]${NC} %s\n" "$1"
   fi
 }
 
@@ -319,10 +319,10 @@ configure_path() {
   print_success "PATH configured in $shell_config"
 
   # Provide instructions
-  echo ""
+  printf "\n"
   print_info "To use agentfield in this terminal session, run:"
-  echo -e "  ${CYAN}source $shell_config${NC}"
-  echo ""
+  printf "  ${CYAN}source %s${NC}\n" "$shell_config"
+  printf "\n"
   print_info "Or open a new terminal window"
 }
 
@@ -352,48 +352,48 @@ verify_installation() {
 
 # Print success message
 print_success_message() {
-  echo ""
-  echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║${NC}  ${BOLD}AgentField CLI installed successfully!${NC}                      ${GREEN}║${NC}"
-  echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
-  echo ""
-  echo -e "${BOLD}Next steps:${NC}"
-  echo ""
-  echo "  1. Reload your shell configuration:"
+  printf "\n"
+  printf "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}\n"
+  printf "${GREEN}║${NC}  ${BOLD}AgentField CLI installed successfully!${NC}                      ${GREEN}║${NC}\n"
+  printf "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}\n"
+  printf "\n"
+  printf "${BOLD}Next steps:${NC}\n"
+  printf "\n"
+  printf "  1. Reload your shell configuration:\n"
 
   local shell_name
   shell_name=$(basename "$SHELL")
   case "$shell_name" in
     bash)
       if [[ -f "$HOME/.bashrc" ]]; then
-        echo -e "     ${CYAN}source ~/.bashrc${NC}"
+        printf "     ${CYAN}source ~/.bashrc${NC}\n"
       else
-        echo -e "     ${CYAN}source ~/.bash_profile${NC}"
+        printf "     ${CYAN}source ~/.bash_profile${NC}\n"
       fi
       ;;
     zsh)
-      echo -e "     ${CYAN}source ~/.zshrc${NC}"
+      printf "     ${CYAN}source ~/.zshrc${NC}\n"
       ;;
     fish)
-      echo -e "     ${CYAN}source ~/.config/fish/config.fish${NC}"
+      printf "     ${CYAN}source ~/.config/fish/config.fish${NC}\n"
       ;;
     *)
-      echo -e "     ${CYAN}source your shell config file${NC}"
+      printf "     ${CYAN}source your shell config file${NC}\n"
       ;;
   esac
 
-  echo ""
-  echo "  2. Verify installation:"
-  echo -e "     ${CYAN}agentfield --version${NC}"
-  echo ""
-  echo "  3. Initialize your first agent:"
-  echo -e "     ${CYAN}agentfield init my-agent${NC}"
-  echo ""
-  echo -e "${BOLD}Resources:${NC}"
-  echo -e "  Documentation: ${BLUE}https://agentfield.ai/docs${NC}"
-  echo -e "  GitHub:        ${BLUE}https://github.com/$REPO${NC}"
-  echo -e "  Support:       ${BLUE}https://github.com/$REPO/issues${NC}"
-  echo ""
+  printf "\n"
+  printf "  2. Verify installation:\n"
+  printf "     ${CYAN}agentfield --version${NC}\n"
+  printf "\n"
+  printf "  3. Initialize your first agent:\n"
+  printf "     ${CYAN}agentfield init my-agent${NC}\n"
+  printf "\n"
+  printf "${BOLD}Resources:${NC}\n"
+  printf "  Documentation: ${BLUE}https://agentfield.ai/docs${NC}\n"
+  printf "  GitHub:        ${BLUE}https://github.com/$REPO${NC}\n"
+  printf "  Support:       ${BLUE}https://github.com/$REPO/issues${NC}\n"
+  printf "\n"
 }
 
 # Main installation flow
