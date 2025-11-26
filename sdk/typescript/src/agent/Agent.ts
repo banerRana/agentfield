@@ -97,6 +97,8 @@ export class Agent {
     await this.registerWithControlPlane();
     const port = this.config.port ?? 8001;
     const host = this.config.host ?? '0.0.0.0';
+    // First heartbeat marks the node as starting; subsequent interval sets ready.
+    await this.agentFieldClient.heartbeat('starting');
     await new Promise<void>((resolve, reject) => {
       this.server = this.app
         .listen(port, host, () => resolve())
@@ -168,6 +170,11 @@ export class Agent {
   private registerDefaultRoutes() {
     this.app.get('/health', (_req, res) => {
       res.json(this.health());
+    });
+
+    // MCP health probe expected by control-plane UI
+    this.app.get('/health/mcp', (_req, res) => {
+      res.json({ status: 'ok' });
     });
 
     this.app.get('/status', (_req, res) => {
@@ -326,7 +333,7 @@ export class Agent {
 
     const tick = async () => {
       try {
-        await this.agentFieldClient.heartbeat();
+        await this.agentFieldClient.heartbeat('ready');
       } catch (err) {
         if (!this.config.devMode) {
           console.warn('Heartbeat failed', err);
@@ -340,7 +347,7 @@ export class Agent {
 
   private health(): HealthStatus {
     return {
-      status: 'ok',
+      status: 'running',
       nodeId: this.config.nodeId,
       version: this.config.version
     };

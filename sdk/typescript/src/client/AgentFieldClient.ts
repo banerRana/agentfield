@@ -15,9 +15,11 @@ export class AgentFieldClient {
     await this.http.post('/api/v1/nodes/register', payload);
   }
 
-  async heartbeat(): Promise<HealthStatus> {
-    const res = await this.http.get('/api/v1/nodes/heartbeat', {
-      params: { nodeId: this.config.nodeId }
+  async heartbeat(status: 'starting' | 'ready' | 'degraded' | 'offline' = 'ready'): Promise<HealthStatus> {
+    const nodeId = this.config.nodeId;
+    const res = await this.http.post(`/api/v1/nodes/${nodeId}/heartbeat`, {
+      status,
+      timestamp: new Date().toISOString()
     });
     return res.data as HealthStatus;
   }

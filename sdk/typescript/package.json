@@ -13,7 +13,7 @@
     "dev": "tsup --watch",
     "lint": "tsc --noEmit",
     "test": "vitest",
-    "example:simulation": "npm run build -- --silent && node dist/examples/simulation.js"
+    "e:s": "npm run build -- --silent && node dist/examples/simulation.js"
   },
   "exports": {
     ".": {

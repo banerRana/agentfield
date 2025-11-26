@@ -1,7 +1,17 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Agent } from '../src/agent/Agent.js';
 import { AgentRouter } from '../src/router/AgentRouter.js';
 import { z } from 'zod';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Load .env from current working directory (e.g., sdk/typescript) first,
+// then fall back to the project root when running from dist/.
+dotenv.config({ path: resolve(process.cwd(), '.env') });
+if (!process.env.OPENAI_API_KEY) {
+  dotenv.config({ path: resolve(__dirname, '../../.env') });
+}
 
 console.log('Starting simulation example...');
 
@@ -17,16 +27,18 @@ const SimulationResultSchema = z.object({
     outcomeDistribution: z.record(z.number())
   })
 });
-
 type SimulationResult = z.infer<typeof SimulationResultSchema>;
 
-simulationRouter.reasoner<{
-  scenario: string;
-  populationSize: number;
-  context?: string[];
-  parallelBatchSize?: number;
-  explorationRatio?: number;
-}, SimulationResult>('runSimulation', async (ctx) => {
+const SimulationInputSchema = z.object({
+  scenario: z.string(),
+  populationSize: z.number(),
+  context: z.array(z.string()),
+  parallelBatchSize: z.number().optional(),
+  explorationRatio: z.number().optional(),
+})
+type SimulationInput = z.infer<typeof SimulationInputSchema>;
+
+simulationRouter.reasoner<SimulationInput, SimulationResult>('runSimulation', async (ctx) => {
   const { scenario, populationSize, context = [], parallelBatchSize = 20 } = ctx.input;
 
   const scenarioAnalysis = await ctx.ai(`Analyze scenario: ${scenario}`);
@@ -52,8 +64,14 @@ simulationRouter.reasoner<{ scenario: string }, any>('decomposeScenario', async 
 
 const agent = new Agent({
   nodeId: 'simulation-engine',
-  aiConfig: { model: 'gpt-4o', provider: 'openai', apiKey: process.env.OPENAI_API_KEY },
-  host: '127.0.0.1',
+  // aiConfig: { model: 'gpt-4o', provider: 'openai', apiKey: process.env.OPENAI_API_KEY },
+  aiConfig: {
+    provider: 'openai', // OpenRouter is OpenAI-compatible
+    model: 'openrouter/deepseek/deepseek-v3.1-terminus',
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseUrl: 'https://openrouter.ai/api/v1'
+  },
+  host: 'localhost',
   devMode: true
 });
 

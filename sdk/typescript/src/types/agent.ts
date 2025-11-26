@@ -64,7 +64,7 @@ export interface AgentState {
 }
 
 export interface HealthStatus {
-  status: 'ok';
+  status: 'ok' | 'running';
   nodeId: string;
   version?: string;
 }
