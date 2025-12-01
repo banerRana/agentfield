@@ -3,7 +3,6 @@ import pytest
 from agentfield.execution_context import (
     ExecutionContext,
     generate_execution_id,
-    get_current_context,
     set_execution_context,
     reset_execution_context,
 )
