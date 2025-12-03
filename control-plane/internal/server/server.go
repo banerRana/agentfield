@@ -937,11 +937,7 @@ func (s *AgentFieldServer) setupRoutes() {
 		agentAPI.DELETE("/memory/vector/namespace", handlers.DeleteNamespaceVectorsHandler(s.storage))
 
 		// Memory events endpoints
-		memoryEventsHandler := handlers.NewMemoryEventsHandler(
-			s.storage,
-			corsConfig.AllowOrigins,
-			s.config.API.Auth.APIKey != "",
-		)
+		memoryEventsHandler := handlers.NewMemoryEventsHandler(s.storage)
 		agentAPI.GET("/memory/events/ws", memoryEventsHandler.WebSocketHandler)
 		agentAPI.GET("/memory/events/sse", memoryEventsHandler.SSEHandler)
 		agentAPI.GET("/memory/events/history", handlers.GetEventHistoryHandler(s.storage))
