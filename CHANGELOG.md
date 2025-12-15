@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.22-rc.2] - 2025-12-15
+
+
+### Added
+
+- Feat(go-sdk): add Memory and Note APIs for agent state and progress tracking (#71)
+
+Add two major new capabilities to the Go SDK:
+
+## Memory System
+- Hierarchical scoped storage (workflow, session, user, global)
+- Pluggable MemoryBackend interface for custom storage
+- Default in-memory backend included
+- Automatic scope ID resolution from execution context
+
+## Note API
+- Fire-and-forget progress/status messages to AgentField UI
+- Note(ctx, message, tags...) and Notef(ctx, format, args...) methods
+- Async HTTP delivery with proper execution context headers
+- Silent failure mode to avoid interrupting workflows
+
+These additions enable agents to:
+- Persist state across handler invocations within a session
+- Share data between workflows at different scopes
+- Report real-time progress updates visible in the UI
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.5 <noreply@anthropic.com> (1c48c1f)
+
 ## [0.1.22-rc.1] - 2025-12-15
 
 
