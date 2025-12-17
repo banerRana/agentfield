@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.24-rc.2] - 2025-12-17
+
+
+### Other
+
+- Deployments: Docker/Helm/Kustomize quickstarts + demo agents (#81)
+
+* Update Docker deployment and configuration
+
+Refactors the Docker deployment documentation and configuration to improve clarity and flexibility for setting up control planes and agents.
+
+Key changes include:
+- Enhancing the README for Docker deployments with more detailed instructions for running agents in Docker, distinguishing between agents on the host and agents within the same Docker Compose network.
+- Adding specific guidance on using `host.docker.internal` for host-based agents and service names for agents within the same network.
+- Introducing new Docker Compose services for a demo Go agent and a demo Python agent, enabling them to be run with Docker Compose profiles.
+- Updating configuration options in `control-plane/internal/config/config.go` to include `mapstructure` tags, improving the flexibility of configuration loading.
+- Adding a new test case `TestLoadConfig_VCRequirementsFromConfigFile` to verify loading VC requirements from a configuration file.
+- Modifying the Python hello world example to use an environment variable for the AgentField server URL, making it more adaptable to different deployment scenarios.
+- Updating the Dockerized README to include validation steps for execution paths and Verifiable Credentials (VCs).
+
+* Update deployment documentation and manifests
+
+Updates the README files for Docker, Helm, and Kubernetes deployments to improve clarity and provide more streamlined quick-start guides.
+
+The changes include:
+- Simplifying the Docker Compose setup instructions.
+- Refining the Helm chart documentation to recommend PostgreSQL and the Python demo agent by default.
+- Streamlining the Kubernetes manifests to suggest the Python demo agent overlay as a recommended starting point.
+- Modifying the Python demo agent deployment in Kubernetes to directly install the AgentField SDK from PyPI instead of relying on a pre-built local image. This simplifies the local development workflow for the Python agent.
+
+* Update documentation for deployment examples
+
+Adds instructions for waiting for demo agents to become ready and for building/loading the Go demo agent image with Minikube.
+
+Also includes an example of how to use the API key when authentication is enabled.
+
+Updates the control plane deployment configuration to default `AGENTFIELD_CONFIG_FILE` to `/dev/null`.
+
+Adjusts the kustomization file for the postgres demo overlay to use the standard `patches` key. (b6b0cd3)
+
 ## [0.1.24-rc.1] - 2025-12-17
 
 
