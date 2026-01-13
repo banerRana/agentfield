@@ -20,9 +20,11 @@
 
 </div>
 
-
-
-
+<div align="center">
+<a href="https://github.com/Agent-Field/af-deep-research">
+<img src="assets/deepresearch banner.png" alt="Deep Research API" width="100%" />
+</a>
+</div>
 
 ## What is AgentField?
 
