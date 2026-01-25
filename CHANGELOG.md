@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.38-rc.1] - 2026-01-25
+
+
+### Testing
+
+- Test(sdk/go): add HTTP error handling tests (#160)
+
+* test: add test handling of new http status codes
+
+* add tests for unmarshal json, network errorr, and timeout
+
+* add other test and fix
+
+* fix (481b410)
+
 ## [0.1.37] - 2026-01-22
 
 ## [0.1.37-rc.1] - 2026-01-22
