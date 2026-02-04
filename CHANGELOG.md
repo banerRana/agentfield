@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.41-rc.1] - 2026-02-04
+
+
+### Documentation
+
+- Docs: [Go SDK] Add documentation to Config struct fields (#171) (5dc1a59)
+
+
+
+### Other
+
+- Improve README: add Discord visibility and Production Examples section
+
+- Add Discord link to quick links navigation row
+- Remove Deep Research banner (replaced with examples table)
+- Add Production Examples section with Deep Research API and RAG Evaluator
+- Enhance Community section with prominent Discord badge
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com> (75f0f2f)
+
 ## [0.1.40] - 2026-02-03
 
 ## [0.1.40-rc.1] - 2026-02-03
