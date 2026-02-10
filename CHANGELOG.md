@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.41-rc.3] - 2026-02-10
+
+
+### Other
+
+- Fix workflow cleanup to remove executions-backed run summaries (#177)
+
+* Fix workflow cleanup to remove run summaries from executions
+
+* Add Postgres cleanup parity test for workflow deletion (ab2ce92)
+
 ## [0.1.41-rc.2] - 2026-02-09
 
 
