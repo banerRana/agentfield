@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [Unreleased]
+
+### Testing
+
+- Test(web-ui): set up vitest testing infrastructure (#103)
+
+Add unit testing infrastructure to the Web UI (`control-plane/web/client/`),
+which previously had zero test coverage.
+
+- Install vitest, @testing-library/react, @testing-library/jest-dom,
+  @testing-library/user-event, @vitest/coverage-v8, and jsdom as devDependencies
+- Add `vitest.config.ts` with jsdom environment, `@` path alias, and v8 coverage provider
+- Add `src/test/setup.ts` to extend vitest with jest-dom matchers
+- Add `src/test/components/status/StatusBadge.test.tsx` with comprehensive tests:
+    - All `AgentState`, `HealthStatus`, and `LifecycleStatus` values via `it.each`
+    - Priority ordering between `state`, `healthStatus`, and `lifecycleStatus` props
+    - `showIcon` behaviour and `size` prop smoke tests
+    - `status` prop (AgentStatus object): `status.state`, `showHealthScore` percentage
+      display, `state_transition` arrow label, and `animate-pulse` during transitions
+    - Dedicated `AgentStateBadge`, `HealthStatusBadge`, `LifecycleStatusBadge` exports
+    - `getHealthScoreColor` utility — boundary tests across all four score tiers
+    - `getHealthScoreBadgeVariant` utility — returns correct badge variant per tier
+- Add `test`, `test:watch`, and `test:coverage` scripts to package.json
+- Wire `npm run test` into `scripts/test-all.sh` alongside the existing lint step
+
 ## [0.1.42-rc.4] - 2026-02-27
 
 
