@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.42-rc.5] - 2026-02-27
+
+
+### Chores
+
+- Chore: remove redundant CLA assistant workflow (#192)
+
+The contributor-assistant/github-action workflow requires a PAT to
+store signatures in the remote .github repo, which is not configured.
+The hosted cla-assistant.io integration (license/cla) is already
+active and working, making this workflow redundant.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (aedd982)
+
+- Chore: add CLA assistant workflow (abd1d79)
+
+- Chore: add CODEOWNERS with AbirAbbas as default reviewer (0ea7a8c)
+
+
+
+### Fixed
+
+- Fix(release): use deploy key to bypass branch protection on push (#193)
+
+The release workflow pushes version bump commits directly to main,
+which is blocked by the new branch ruleset requiring PRs. Use a
+deploy key (which is in the ruleset bypass list) instead of the
+default GITHUB_TOKEN.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (11d0889)
+
+
+
+### Other
+
+- Set up vitest testing infrastructure, with sample test cases for status badge component (#191)
+
+* Set up vitest testing infrastructure, with sample test cases for status badge component
+
+* Reversed IDE formatting from computer to prevent large diff in changelog.md
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (0c5147f)
+
 ## [Unreleased]
 
 ### Testing
