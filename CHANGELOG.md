@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.42-rc.4] - 2026-02-27
+
+
+### Chores
+
+- Chore(web-ui): remove dead filter components (#190)
+
+Remove 9 unused files that are not imported anywhere in the app.
+The Executions page uses PageHeader with FilterSelect dropdowns,
+not these legacy toggle-button filter components.
+
+Removed files:
+- ExecutionFilters.tsx, ExecutionsList.tsx, QuickFilters.tsx
+- SearchWithFilters.tsx, SuggestedFilters.tsx, FilterTag.tsx
+- hooks/useFilterState.ts, utils/filterUtils.ts, types/filters.ts
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ef8efe8)
+
 ## [0.1.42-rc.3] - 2026-02-24
 
 
