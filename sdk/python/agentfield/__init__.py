@@ -38,6 +38,14 @@ from .media_providers import (
     get_provider,
     register_provider,
 )
+from .did_auth import (
+    DIDAuthenticator,
+    create_did_auth_headers,
+    sign_request,
+    HEADER_CALLER_DID,
+    HEADER_DID_SIGNATURE,
+    HEADER_DID_TIMESTAMP,
+)
 from .exceptions import (
     AgentFieldError,
     AgentFieldClientError,
@@ -84,6 +92,13 @@ __all__ = [
     "OpenRouterProvider",
     "get_provider",
     "register_provider",
+    # DID authentication
+    "DIDAuthenticator",
+    "create_did_auth_headers",
+    "sign_request",
+    "HEADER_CALLER_DID",
+    "HEADER_DID_SIGNATURE",
+    "HEADER_DID_TIMESTAMP",
     # Exceptions
     "AgentFieldError",
     "AgentFieldClientError",

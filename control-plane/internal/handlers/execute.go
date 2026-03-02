@@ -14,10 +14,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/events"
 	"github.com/Agent-Field/agentfield/control-plane/internal/logger"
+	"github.com/Agent-Field/agentfield/control-plane/internal/server/middleware"
 	"github.com/Agent-Field/agentfield/control-plane/internal/services"
 	"github.com/Agent-Field/agentfield/control-plane/internal/utils"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
@@ -28,6 +30,7 @@ import (
 // ExecutionStore captures the storage operations required by the simplified execution handlers.
 type ExecutionStore interface {
 	GetAgent(ctx context.Context, id string) (*types.AgentNode, error)
+	ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error)
 	CreateExecutionRecord(ctx context.Context, execution *types.Execution) error
 	GetExecutionRecord(ctx context.Context, executionID string) (*types.Execution, error)
 	UpdateExecutionRecord(ctx context.Context, executionID string, update func(*types.Execution) (*types.Execution, error)) (*types.Execution, error)
@@ -60,6 +63,7 @@ type ExecuteResponse struct {
 	Status            string      `json:"status"`
 	Result            interface{} `json:"result,omitempty"`
 	ErrorMessage      *string     `json:"error_message,omitempty"`
+	ErrorDetails      interface{} `json:"error_details,omitempty"`
 	DurationMS        int64       `json:"duration_ms"`
 	FinishedAt        string      `json:"finished_at"`
 	WebhookRegistered bool        `json:"webhook_registered,omitempty"`
@@ -86,6 +90,7 @@ type ExecutionStatusResponse struct {
 	Status            string                         `json:"status"`
 	Result            interface{}                    `json:"result,omitempty"`
 	Error             *string                        `json:"error,omitempty"`
+	ErrorDetails      interface{}                    `json:"error_details,omitempty"`
 	StartedAt         string                         `json:"started_at"`
 	CompletedAt       *string                        `json:"completed_at,omitempty"`
 	DurationMS        *int64                         `json:"duration_ms,omitempty"`
@@ -111,12 +116,13 @@ type executionStatusUpdateRequest struct {
 }
 
 type executionController struct {
-	store      ExecutionStore
-	httpClient *http.Client
-	payloads   services.PayloadStore
-	webhooks   services.WebhookDispatcher
-	eventBus   *events.ExecutionEventBus
-	timeout    time.Duration
+	store         ExecutionStore
+	httpClient    *http.Client
+	payloads      services.PayloadStore
+	webhooks      services.WebhookDispatcher
+	eventBus      *events.ExecutionEventBus
+	timeout       time.Duration
+	internalToken string // sent as Authorization header when forwarding to agents
 }
 
 type asyncExecutionJob struct {
@@ -152,36 +158,36 @@ const (
 )
 
 // ExecuteHandler handles synchronous execution requests.
-func ExecuteHandler(store ExecutionStore, payloads services.PayloadStore, webhooks services.WebhookDispatcher, timeout time.Duration) gin.HandlerFunc {
-	controller := newExecutionController(store, payloads, webhooks, timeout)
+func ExecuteHandler(store ExecutionStore, payloads services.PayloadStore, webhooks services.WebhookDispatcher, timeout time.Duration, internalToken string) gin.HandlerFunc {
+	controller := newExecutionController(store, payloads, webhooks, timeout, internalToken)
 	return controller.handleSync
 }
 
 // ExecuteAsyncHandler handles asynchronous execution requests.
-func ExecuteAsyncHandler(store ExecutionStore, payloads services.PayloadStore, webhooks services.WebhookDispatcher, timeout time.Duration) gin.HandlerFunc {
-	controller := newExecutionController(store, payloads, webhooks, timeout)
+func ExecuteAsyncHandler(store ExecutionStore, payloads services.PayloadStore, webhooks services.WebhookDispatcher, timeout time.Duration, internalToken string) gin.HandlerFunc {
+	controller := newExecutionController(store, payloads, webhooks, timeout, internalToken)
 	return controller.handleAsync
 }
 
 // GetExecutionStatusHandler resolves a single execution record.
 func GetExecutionStatusHandler(store ExecutionStore) gin.HandlerFunc {
-	controller := newExecutionController(store, nil, nil, 0)
+	controller := newExecutionController(store, nil, nil, 0, "")
 	return controller.handleStatus
 }
 
 // BatchExecutionStatusHandler resolves multiple execution records.
 func BatchExecutionStatusHandler(store ExecutionStore) gin.HandlerFunc {
-	controller := newExecutionController(store, nil, nil, 0)
+	controller := newExecutionController(store, nil, nil, 0, "")
 	return controller.handleBatchStatus
 }
 
 // UpdateExecutionStatusHandler ingests status callbacks from agent nodes.
 func UpdateExecutionStatusHandler(store ExecutionStore, payloads services.PayloadStore, webhooks services.WebhookDispatcher, timeout time.Duration) gin.HandlerFunc {
-	controller := newExecutionController(store, payloads, webhooks, timeout)
+	controller := newExecutionController(store, payloads, webhooks, timeout, "")
 	return controller.handleStatusUpdate
 }
 
-func newExecutionController(store ExecutionStore, payloads services.PayloadStore, webhooks services.WebhookDispatcher, timeout time.Duration) *executionController {
+func newExecutionController(store ExecutionStore, payloads services.PayloadStore, webhooks services.WebhookDispatcher, timeout time.Duration, internalToken string) *executionController {
 	// Use default timeout if not provided (0 or negative)
 	if timeout <= 0 {
 		timeout = 90 * time.Second
@@ -191,10 +197,11 @@ func newExecutionController(store ExecutionStore, payloads services.PayloadStore
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
-		payloads: payloads,
-		webhooks: webhooks,
-		eventBus: store.GetExecutionEventBus(),
-		timeout:  timeout,
+		payloads:      payloads,
+		webhooks:      webhooks,
+		eventBus:      store.GetExecutionEventBus(),
+		timeout:       timeout,
+		internalToken: internalToken,
 	}
 }
 
@@ -260,13 +267,14 @@ func (c *executionController) handleSync(ctx *gin.Context) {
 				RunID:             exec.RunID,
 				Status:            string(exec.Status),
 				ErrorMessage:      &errMsg,
+				ErrorDetails:      decodeJSON(exec.ResultPayload),
 				DurationMS:        durationMS,
 				FinishedAt:        finishedAt,
 				WebhookRegistered: exec.WebhookRegistered,
 			}
 			ctx.Header("X-Execution-ID", exec.ExecutionID)
 			ctx.Header("X-Run-ID", exec.RunID)
-			ctx.JSON(http.StatusOK, response)
+			ctx.JSON(http.StatusBadGateway, response)
 			return
 		}
 
@@ -282,6 +290,9 @@ func (c *executionController) handleSync(ctx *gin.Context) {
 		}
 		ctx.Header("X-Execution-ID", exec.ExecutionID)
 		ctx.Header("X-Run-ID", exec.RunID)
+		if plan.routedVersion != "" {
+			ctx.Header("X-Routed-Version", plan.routedVersion)
+		}
 		ctx.JSON(http.StatusOK, response)
 		return
 	}
@@ -322,6 +333,9 @@ func (c *executionController) handleSync(ctx *gin.Context) {
 
 	ctx.Header("X-Execution-ID", plan.exec.ExecutionID)
 	ctx.Header("X-Run-ID", plan.exec.RunID)
+	if plan.routedVersion != "" {
+		ctx.Header("X-Routed-Version", plan.routedVersion)
+	}
 	ctx.JSON(http.StatusOK, response)
 }
 
@@ -718,6 +732,18 @@ func (c *executionController) waitForExecutionCompletion(ctx context.Context, ex
 		Dur("timeout", timeout).
 		Msg("waiting for execution completion via event bus")
 
+	// Check if execution already completed before we subscribed (race condition:
+	// fast agents may POST the callback before we subscribe to the event bus).
+	if existing, err := c.store.GetExecutionRecord(ctx, executionID); err == nil && existing != nil {
+		if types.IsTerminalExecutionStatus(existing.Status) {
+			logger.Logger.Debug().
+				Str("execution_id", executionID).
+				Str("status", existing.Status).
+				Msg("execution already completed before event subscription")
+			return existing, nil
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -768,6 +794,11 @@ type preparedExecution struct {
 	targetType        string
 	webhookRegistered bool
 	webhookError      *string
+	// DID context forwarded to the target agent.
+	callerDID string
+	targetDID string
+	// Version that was selected during routing (empty if default/unversioned agent)
+	routedVersion string
 }
 
 func (c *executionController) prepareExecution(ctx context.Context, ginCtx *gin.Context) (*preparedExecution, error) {
@@ -781,8 +812,9 @@ func (c *executionController) prepareExecution(ctx context.Context, ginCtx *gin.
 	if err := ginCtx.ShouldBindJSON(&req); err != nil {
 		return nil, fmt.Errorf("invalid request body: %w", err)
 	}
-	if len(req.Input) == 0 {
-		return nil, errors.New("input is required")
+	// Allow empty input for skills/reasoners that take no parameters (e.g., ping, get_schema).
+	if req.Input == nil {
+		req.Input = map[string]interface{}{}
 	}
 
 	var (
@@ -800,13 +832,26 @@ func (c *executionController) prepareExecution(ctx context.Context, ginCtx *gin.
 		}
 	}
 
-	agent, err := c.store.GetAgent(ctx, target.NodeID)
+	// Version-aware agent resolution:
+	// 1. Try GetAgent (default unversioned agent, version='')
+	// 2. If not found, fall back to ListAgentVersions and select via weighted round-robin
+	var agent *types.AgentNode
+	var routedVersion string
+
+	agent, err = c.store.GetAgent(ctx, target.NodeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load agent '%s': %w", target.NodeID, err)
+		// GetAgent returns error for "not found" — check if versioned agents exist
+		versions, listErr := c.store.ListAgentVersions(ctx, target.NodeID)
+		if listErr != nil || len(versions) == 0 {
+			return nil, fmt.Errorf("agent '%s' not found", target.NodeID)
+		}
+		// Filter to healthy nodes
+		agent, routedVersion = selectVersionedAgent(versions)
+		if agent == nil {
+			return nil, fmt.Errorf("agent '%s' has no healthy versioned nodes", target.NodeID)
+		}
 	}
-	if agent == nil {
-		return nil, fmt.Errorf("agent '%s' not found", target.NodeID)
-	}
+
 	if agent.DeploymentType == "" && agent.Metadata.Custom != nil {
 		if v, ok := agent.Metadata.Custom["serverless"]; ok && fmt.Sprint(v) == "true" {
 			agent.DeploymentType = "serverless"
@@ -926,6 +971,9 @@ func (c *executionController) prepareExecution(ctx context.Context, ginCtx *gin.
 		targetType:        targetType,
 		webhookRegistered: webhookRegistered,
 		webhookError:      webhookError,
+		callerDID:         middleware.GetVerifiedCallerDID(ginCtx),
+		targetDID:         middleware.GetTargetDID(ginCtx),
+		routedVersion:     routedVersion,
 	}, nil
 }
 
@@ -949,6 +997,15 @@ func (c *executionController) callAgent(ctx context.Context, plan *preparedExecu
 	}
 	if plan.exec.ActorID != nil {
 		req.Header.Set("X-Actor-ID", *plan.exec.ActorID)
+	}
+	if c.internalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.internalToken)
+	}
+	if plan.callerDID != "" {
+		req.Header.Set("X-Caller-DID", plan.callerDID)
+	}
+	if plan.targetDID != "" {
+		req.Header.Set("X-Target-DID", plan.targetDID)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -981,7 +1038,11 @@ func (c *executionController) callAgent(ctx context.Context, plan *preparedExecu
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		return body, time.Since(start), false, fmt.Errorf("agent error (%d): %s", resp.StatusCode, truncateForLog(body))
+		return body, time.Since(start), false, &callError{
+			statusCode: resp.StatusCode,
+			message:    fmt.Sprintf("agent error (%d): %s", resp.StatusCode, truncateForLog(body)),
+			body:       body,
+		}
 	}
 
 	return body, time.Since(start), false, nil
@@ -1196,6 +1257,73 @@ func buildAgentURL(agent *types.AgentNode, target *parsedTarget) string {
 	return fmt.Sprintf("%s/reasoners/%s", base, target.TargetName)
 }
 
+// versionRoundRobinCounter is used for round-robin selection across versioned agents.
+var versionRoundRobinCounter uint64
+
+// selectVersionedAgent picks a healthy agent from the versioned list using
+// weighted round-robin. Returns the selected agent and its version string.
+func selectVersionedAgent(versions []*types.AgentNode) (*types.AgentNode, string) {
+	// Filter to healthy nodes
+	var healthy []*types.AgentNode
+	for _, v := range versions {
+		if v.HealthStatus == types.HealthStatusActive && v.LifecycleStatus == types.AgentStatusReady {
+			healthy = append(healthy, v)
+		}
+	}
+	if len(healthy) == 0 {
+		// Fallback: accept any non-offline node
+		for _, v := range versions {
+			if v.LifecycleStatus != types.AgentStatusOffline {
+				healthy = append(healthy, v)
+			}
+		}
+	}
+	if len(healthy) == 0 {
+		return nil, ""
+	}
+
+	// Check if all weights are equal (use simple round-robin)
+	allEqual := true
+	firstWeight := healthy[0].TrafficWeight
+	totalWeight := 0
+	for _, v := range healthy {
+		w := v.TrafficWeight
+		if w <= 0 {
+			w = 100
+		}
+		totalWeight += w
+		if w != firstWeight {
+			allEqual = false
+		}
+	}
+
+	if allEqual || totalWeight == 0 {
+		// Simple round-robin
+		n := atomic.AddUint64(&versionRoundRobinCounter, 1) - 1
+		idx := n % uint64(len(healthy))
+		selected := healthy[idx]
+		return selected, selected.Version
+	}
+
+	// Weighted selection
+	n := atomic.AddUint64(&versionRoundRobinCounter, 1) - 1
+	counter := n % uint64(totalWeight)
+	cumulative := 0
+	for _, v := range healthy {
+		w := v.TrafficWeight
+		if w <= 0 {
+			w = 100
+		}
+		cumulative += w
+		if uint64(cumulative) > counter {
+			return v, v.Version
+		}
+	}
+
+	// Fallback
+	return healthy[0], healthy[0].Version
+}
+
 func buildServerlessPayload(target *parsedTarget, exec *types.Execution, headers executionHeaders, input map[string]interface{}) map[string]interface{} {
 	if target == nil || exec == nil {
 		return map[string]interface{}{
@@ -1325,7 +1453,7 @@ func renderStatus(exec *types.Execution) ExecutionStatusResponse {
 		completedAt = &formatted
 	}
 
-	return ExecutionStatusResponse{
+	resp := ExecutionStatusResponse{
 		ExecutionID:       exec.ExecutionID,
 		RunID:             exec.RunID,
 		Status:            exec.Status,
@@ -1337,6 +1465,12 @@ func renderStatus(exec *types.Execution) ExecutionStatusResponse {
 		WebhookRegistered: exec.WebhookRegistered,
 		WebhookEvents:     exec.WebhookEvents,
 	}
+	// For failed executions, expose the agent's raw response as error_details
+	// so callers can access structured error data (e.g., permission_denied fields).
+	if exec.Status == types.ExecutionStatusFailed && len(exec.ResultPayload) > 0 {
+		resp.ErrorDetails = decodeJSON(exec.ResultPayload)
+	}
+	return resp
 }
 
 func (c *executionController) ensureWorkflowExecutionRecord(ctx context.Context, exec *types.Execution, target *parsedTarget, payload []byte) {
@@ -1486,11 +1620,47 @@ func cloneBytes(src []byte) []byte {
 	return dst
 }
 
+// callError wraps an upstream agent HTTP error, preserving the original status
+// code and response body for structured error propagation.
+type callError struct {
+	statusCode int
+	message    string
+	body       []byte
+}
+
+func (e *callError) Error() string {
+	return e.message
+}
+
 func writeExecutionError(ctx *gin.Context, err error) {
 	if err == nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "unknown error"})
 		return
 	}
+
+	var ce *callError
+	if errors.As(err, &ce) {
+		response := gin.H{
+			"error":  ce.message,
+			"status": "failed",
+		}
+		// Preserve structured error data from the agent's response body.
+		if len(ce.body) > 0 {
+			var parsed interface{}
+			if json.Unmarshal(ce.body, &parsed) == nil {
+				response["error_details"] = parsed
+			}
+		}
+		// Propagate 4xx status codes from the agent (client-facing errors);
+		// use 502 Bad Gateway for 5xx (upstream server failure).
+		httpStatus := http.StatusBadGateway
+		if ce.statusCode >= 400 && ce.statusCode < 500 {
+			httpStatus = ce.statusCode
+		}
+		ctx.JSON(httpStatus, response)
+		return
+	}
+
 	ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 }
 

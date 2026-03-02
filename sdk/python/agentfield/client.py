@@ -18,12 +18,13 @@ from .types import (
     WebhookConfig,
 )
 from .async_config import AsyncConfig
-from .execution_state import ExecutionStatus
+from .execution_state import ExecuteError, ExecutionStatus
 from .result_cache import ResultCache
 from .async_execution_manager import AsyncExecutionManager
 from .logger import get_logger
 from .status import normalize_status
 from .execution_context import generate_run_id
+from .did_auth import DIDAuthenticator
 from .exceptions import (
     AgentFieldError,
     AgentFieldClientError,
@@ -99,10 +100,15 @@ class AgentFieldClient:
         base_url: str = "http://localhost:8080",
         api_key: Optional[str] = None,
         async_config: Optional[AsyncConfig] = None,
+        did: Optional[str] = None,
+        private_key_jwk: Optional[str] = None,
     ):
         self.base_url = base_url
         self.api_base = f"{base_url}/api/v1"
         self.api_key = api_key
+
+        # DID authentication for agent-to-agent calls
+        self._did_authenticator = DIDAuthenticator(did=did, private_key_jwk=private_key_jwk)
 
         # Async execution components
         self.async_config = async_config or AsyncConfig()
@@ -112,6 +118,8 @@ class AgentFieldClient:
         self._result_cache = ResultCache(self.async_config)
         self._latest_event_stream_headers: Dict[str, str] = {}
         self._current_workflow_context = None
+        # Caller agent ID for cross-agent call identification (set by Agent after init)
+        self.caller_agent_id: Optional[str] = None
 
         # Initialize shared sync session if not already created
         if AgentFieldClient._shared_sync_session is None:
@@ -163,6 +171,42 @@ class AgentFieldClient:
         if not self.api_key:
             return {}
         return {"X-API-Key": self.api_key}
+
+    def set_did_credentials(self, did: str, private_key_jwk: str) -> bool:
+        """
+        Set DID authentication credentials for agent-to-agent calls.
+
+        Args:
+            did: The agent's DID identifier (e.g., 'did:web:example.com:agents:my-agent')
+            private_key_jwk: JWK-formatted Ed25519 private key for signing
+
+        Returns:
+            True if credentials were set successfully, False otherwise
+        """
+        return self._did_authenticator.set_credentials(did, private_key_jwk)
+
+    def get_did_auth_headers(self, body: bytes) -> Dict[str, str]:
+        """
+        Get DID authentication headers for signing a request.
+
+        Args:
+            body: Request body bytes to sign
+
+        Returns:
+            Dictionary with DID auth headers (X-Caller-DID, X-DID-Signature, X-DID-Timestamp)
+            Empty dict if DID auth is not configured
+        """
+        return self._did_authenticator.sign_headers(body)
+
+    @property
+    def did(self) -> Optional[str]:
+        """Get the configured DID identifier."""
+        return self._did_authenticator.did
+
+    @property
+    def did_auth_configured(self) -> bool:
+        """Check if DID authentication is configured."""
+        return self._did_authenticator.is_configured
 
     def _get_headers_with_context(
         self, headers: Optional[Dict[str, str]] = None
@@ -544,6 +588,7 @@ class AgentFieldClient:
         vc_metadata: Optional[Dict[str, Any]] = None,
         version: str = "1.0.0",
         agent_metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Register or update agent information with AgentField server."""
         try:
@@ -551,6 +596,7 @@ class AgentFieldClient:
             if agent_metadata:
                 custom_metadata.update(agent_metadata)
 
+            agent_tags = tags or []
             registration_data = {
                 "id": node_id,
                 "team_id": "default",
@@ -558,6 +604,7 @@ class AgentFieldClient:
                 "version": version,
                 "reasoners": reasoners,
                 "skills": skills,
+                "proposed_tags": agent_tags,
                 "communication_config": {
                     "protocols": ["http"],
                     "websocket_endpoint": "",
@@ -697,6 +744,10 @@ class AgentFieldClient:
         if actor_id:
             final_headers["X-Actor-ID"] = actor_id
 
+        # Include caller agent ID for permission middleware identification
+        if self.caller_agent_id and "X-Caller-Agent-ID" not in final_headers:
+            final_headers["X-Caller-Agent-ID"] = self.caller_agent_id
+
         sanitized_headers = self._sanitize_header_values(final_headers)
         self._maybe_update_event_stream_headers(sanitized_headers)
         return sanitized_headers
@@ -707,19 +758,40 @@ class AgentFieldClient:
         input_data: Dict[str, Any],
         headers: Dict[str, str],
     ) -> _Submission:
+        import json as json_module
+
         payload = {"input": input_data}
+        # Serialize once so the signed bytes are exactly what gets sent.
+        body_bytes = json_module.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        # Add DID authentication headers if configured
+        final_headers = dict(headers)
+        final_headers["Content-Type"] = "application/json"
+        if self._did_authenticator.is_configured:
+            did_headers = self._did_authenticator.sign_headers(body_bytes)
+            final_headers.update(did_headers)
+
         try:
             response = requests.post(
                 f"{self.api_base}/execute/async/{target}",
-                json=payload,
-                headers=headers,
+                data=body_bytes,
+                headers=final_headers,
                 timeout=self.async_config.polling_timeout,
             )
         except requests.RequestException as exc:
             raise AgentFieldClientError(f"Failed to submit execution: {exc}") from exc
-        response.raise_for_status()
+        if response.status_code >= 400:
+            try:
+                error_body = response.json()
+            except Exception:
+                error_body = None
+            body_msg = ""
+            if isinstance(error_body, dict):
+                body_msg = error_body.get("message") or error_body.get("error") or ""
+            msg = f"{response.status_code}, {body_msg}" if body_msg else str(response.status_code)
+            raise ExecuteError(response.status_code, msg, error_body)
         body = response.json()
-        return self._parse_submission(body, headers, target)
+        return self._parse_submission(body, final_headers, target)
 
     async def _submit_execution_async(
         self,
@@ -727,17 +799,40 @@ class AgentFieldClient:
         input_data: Dict[str, Any],
         headers: Dict[str, str],
     ) -> _Submission:
+        import json as json_module
+
         payload = {"input": input_data}
+        # Serialize once so the signed bytes are exactly what gets sent.
+        # httpx uses compact separators (',', ':') which differ from
+        # json.dumps() defaults (', ', ': '), causing signature mismatch.
+        body_bytes = json_module.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        # Add DID authentication headers if configured
+        final_headers = dict(headers)
+        final_headers["Content-Type"] = "application/json"
+        if self._did_authenticator.is_configured:
+            did_headers = self._did_authenticator.sign_headers(body_bytes)
+            final_headers.update(did_headers)
+
         response = await self._async_request(
             "POST",
             f"{self.api_base}/execute/async/{target}",
-            json=payload,
-            headers=headers,
+            content=body_bytes,
+            headers=final_headers,
             timeout=self.async_config.polling_timeout,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            try:
+                error_body = response.json()
+            except Exception:
+                error_body = None
+            body_msg = ""
+            if isinstance(error_body, dict):
+                body_msg = error_body.get("message") or error_body.get("error") or ""
+            msg = f"{response.status_code}, {body_msg}" if body_msg else str(response.status_code)
+            raise ExecuteError(response.status_code, msg, error_body)
         body = response.json()
-        return self._parse_submission(body, headers, target)
+        return self._parse_submission(body, final_headers, target)
 
     def _parse_submission(
         self,
@@ -874,6 +969,7 @@ class AgentFieldClient:
             "completed_at": payload.get("completed_at"),
             "node_id": node_id,
             "error_message": payload.get("error_message") or payload.get("error"),
+            "error_details": payload.get("error_details"),
         }
 
         if metadata.get("completed_at"):
@@ -911,6 +1007,8 @@ class AgentFieldClient:
         else:
             response_result = result_value
 
+        error_details = metadata.get("error_details")
+
         response = {
             "execution_id": metadata.get("execution_id"),
             "run_id": metadata.get("run_id"),
@@ -923,6 +1021,7 @@ class AgentFieldClient:
             or datetime.datetime.utcnow().isoformat(),
             "result": response_result,
             "error_message": error_message,
+            "error_details": error_details,
             "cost": payload.get("cost"),
         }
 
@@ -1046,6 +1145,7 @@ class AgentFieldClient:
         vc_metadata: Optional[Dict[str, Any]] = None,
         version: str = "1.0.0",
         agent_metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Register agent with immediate status reporting for fast lifecycle."""
         try:
@@ -1053,6 +1153,7 @@ class AgentFieldClient:
             if agent_metadata:
                 custom_metadata.update(agent_metadata)
 
+            agent_tags = tags or []
             registration_data = {
                 "id": node_id,
                 "team_id": "default",
@@ -1060,6 +1161,7 @@ class AgentFieldClient:
                 "version": version,
                 "reasoners": reasoners,
                 "skills": skills,
+                "proposed_tags": agent_tags,
                 "lifecycle_status": status.value,
                 "communication_config": {
                     "protocols": ["http"],
@@ -1153,6 +1255,7 @@ class AgentFieldClient:
                 base_url=self.base_url,
                 config=self.async_config,
                 auth_headers=self._get_auth_headers(),
+                did_authenticator=self._did_authenticator,
             )
             await self._async_execution_manager.start()
             self._maybe_update_event_stream_headers(None)
@@ -1208,6 +1311,13 @@ class AgentFieldClient:
         except Exception as e:
             logger.error(f"Failed to submit async execution for target {target}: {e}")
             if isinstance(e, AgentFieldError):
+                raise
+
+            # Never fall back on authorization errors (401/403) — these are
+            # permanent failures that retrying won't fix and would hit replay
+            # protection (Ed25519 signatures are deterministic within the same second).
+            _status = getattr(e, "status", None)
+            if _status in (401, 403):
                 raise
 
             # Fallback to sync execution if enabled

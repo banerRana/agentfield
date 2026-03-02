@@ -10,13 +10,16 @@ type ReasonerDefinition struct {
 	ID           string          `json:"id"`
 	InputSchema  json.RawMessage `json:"input_schema"`
 	OutputSchema json.RawMessage `json:"output_schema"`
+	Tags         []string        `json:"tags,omitempty"`
+	ProposedTags []string        `json:"proposed_tags,omitempty"`
 }
 
 // SkillDefinition is included for completeness.
 type SkillDefinition struct {
-	ID          string          `json:"id"`
-	InputSchema json.RawMessage `json:"input_schema"`
-	Tags        []string        `json:"tags,omitempty"`
+	ID           string          `json:"id"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	Tags         []string        `json:"tags,omitempty"`
+	ProposedTags []string        `json:"proposed_tags,omitempty"`
 }
 
 // CommunicationConfig declares supported protocols for the agent.
@@ -54,11 +57,16 @@ type NodeRegistrationResponse struct {
 	Message           string    `json:"message,omitempty"`
 	Success           bool      `json:"success"`
 	RegisteredAt      time.Time `json:"-"`
+	Status            string    `json:"status,omitempty"`
+	ProposedTags      []string  `json:"proposed_tags,omitempty"`
+	PendingTags       []string  `json:"pending_tags,omitempty"`
+	AutoApprovedTags  []string  `json:"auto_approved_tags,omitempty"`
 }
 
 // NodeStatusUpdate is used for lease renewals.
 type NodeStatusUpdate struct {
 	Phase       string `json:"phase"`
+	Version     string `json:"version,omitempty"`
 	HealthScore *int   `json:"health_score,omitempty"`
 }
 
@@ -83,6 +91,7 @@ type ActionAckRequest struct {
 // ShutdownRequest notifies the control plane that the node is draining.
 type ShutdownRequest struct {
 	Reason          string `json:"reason,omitempty"`
+	Version         string `json:"version,omitempty"`
 	ExpectedRestart string `json:"expected_restart,omitempty"`
 }
 

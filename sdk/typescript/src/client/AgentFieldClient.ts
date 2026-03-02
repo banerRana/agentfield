@@ -9,6 +9,7 @@ import type {
   HealthStatus
 } from '../types/agent.js';
 import { httpAgent, httpsAgent } from '../utils/httpAgents.js';
+import { DIDAuthenticator } from './DIDAuthenticator.js';
 
 export interface ExecutionStatusUpdate {
   status?: string;
@@ -22,6 +23,7 @@ export class AgentFieldClient {
   private readonly http: AxiosInstance;
   private readonly config: AgentConfig;
   private readonly defaultHeaders: Record<string, string>;
+  private didAuthenticator: DIDAuthenticator;
 
   constructor(config: AgentConfig) {
     const baseURL = (config.agentFieldUrl ?? 'http://localhost:8080').replace(/\/$/, '');
@@ -38,21 +40,33 @@ this.http = axios.create({
       mergedHeaders['X-API-Key'] = config.apiKey;
     }
     this.defaultHeaders = this.sanitizeHeaders(mergedHeaders);
+    this.didAuthenticator = new DIDAuthenticator(config.did, config.privateKeyJwk);
   }
 
-  async register(payload: any) {
-    await this.http.post('/api/v1/nodes/register', payload, { headers: this.mergeHeaders() });
+  async register(payload: any): Promise<any> {
+    const bodyStr = JSON.stringify(payload);
+    const authHeaders = this.didAuthenticator.signRequest(Buffer.from(bodyStr));
+    const res = await this.http.post('/api/v1/nodes/register', bodyStr, {
+      headers: this.mergeHeaders({ 'Content-Type': 'application/json', ...authHeaders })
+    });
+    return res.data;
+  }
+
+  async getNode(nodeId: string): Promise<any> {
+    const res = await this.http.get(`/api/v1/nodes/${encodeURIComponent(nodeId)}`, {
+      headers: this.mergeHeaders({})
+    });
+    return res.data;
   }
 
   async heartbeat(status: 'starting' | 'ready' | 'degraded' | 'offline' = 'ready'): Promise<HealthStatus> {
     const nodeId = this.config.nodeId;
+    const bodyStr = JSON.stringify({ status, version: this.config.version ?? '', timestamp: new Date().toISOString() });
+    const authHeaders = this.didAuthenticator.signRequest(Buffer.from(bodyStr));
     const res = await this.http.post(
       `/api/v1/nodes/${nodeId}/heartbeat`,
-      {
-        status,
-        timestamp: new Date().toISOString()
-      },
-      { headers: this.mergeHeaders() }
+      bodyStr,
+      { headers: this.mergeHeaders({ 'Content-Type': 'application/json', ...authHeaders }) }
     );
     return res.data as HealthStatus;
   }
@@ -83,14 +97,28 @@ this.http = axios.create({
     if (metadata?.agentNodeDid) headers['X-Agent-Node-DID'] = metadata.agentNodeDid;
     if (metadata?.agentNodeId) headers['X-Agent-Node-ID'] = metadata.agentNodeId;
 
-    const res = await this.http.post(
-      `/api/v1/execute/${target}`,
-      {
-        input
-      },
-      { headers: this.mergeHeaders(headers) }
-    );
-    return (res.data?.result as T) ?? res.data;
+    const bodyStr = JSON.stringify({ input });
+    const authHeaders = this.didAuthenticator.signRequest(Buffer.from(bodyStr));
+    try {
+      const res = await this.http.post(
+        `/api/v1/execute/${target}`,
+        bodyStr,
+        { headers: this.mergeHeaders({ 'Content-Type': 'application/json', ...headers, ...authHeaders }) }
+      );
+      return (res.data?.result as T) ?? res.data;
+    } catch (err: any) {
+      // Extract structured error from control plane response (e.g., 403 permission_denied).
+      const respData = err?.response?.data;
+      if (respData) {
+        const status = err.response.status;
+        const msg = respData.message || respData.error || JSON.stringify(respData);
+        const enriched = new Error(`execute ${target} failed (${status}): ${msg}`);
+        (enriched as any).status = status;
+        (enriched as any).responseData = respData;
+        throw enriched;
+      }
+      throw err;
+    }
   }
 
   async publishWorkflowEvent(event: {
@@ -123,9 +151,11 @@ this.http = axios.create({
       duration_ms: event.durationMs
     };
 
+    const bodyStr = JSON.stringify(payload);
+    const authHeaders = this.didAuthenticator.signRequest(Buffer.from(bodyStr));
     const request = this.http
-      .post('/api/v1/workflow/executions/events', payload, {
-        headers: this.mergeHeaders(),
+      .post('/api/v1/workflow/executions/events', bodyStr, {
+        headers: this.mergeHeaders({ 'Content-Type': 'application/json', ...authHeaders }),
         timeout: this.config.devMode ? 1000 : undefined
       })
       .catch(() => {
@@ -149,7 +179,11 @@ this.http = axios.create({
       progress: update.progress !== undefined ? Math.round(update.progress) : undefined
     };
 
-    await this.http.post(`/api/v1/executions/${executionId}/status`, payload, { headers: this.mergeHeaders() });
+    const bodyStr = JSON.stringify(payload);
+    const authHeaders = this.didAuthenticator.signRequest(Buffer.from(bodyStr));
+    await this.http.post(`/api/v1/executions/${executionId}/status`, bodyStr, {
+      headers: this.mergeHeaders({ 'Content-Type': 'application/json', ...authHeaders })
+    });
   }
 
   async discoverCapabilities(options: DiscoveryOptions = {}): Promise<DiscoveryResult> {
@@ -317,6 +351,18 @@ this.http = axios.create({
     return headers;
   }
 
+  setDIDCredentials(did: string, privateKeyJwk: string): void {
+    this.didAuthenticator.setCredentials(did, privateKeyJwk);
+  }
+
+  get didAuthConfigured(): boolean {
+    return this.didAuthenticator.isConfigured;
+  }
+
+  getDID(): string | undefined {
+    return this.didAuthenticator.did;
+  }
+
   sendNote(message: string, tags: string[], agentNodeId: string, metadata: {
     runId?: string;
     executionId?: string;
@@ -336,13 +382,16 @@ this.http = axios.create({
     };
 
     const executionHeaders = this.buildExecutionHeaders({ ...metadata, agentNodeId });
+    const bodyStr = JSON.stringify(payload);
+    const authHeaders = this.didAuthenticator.signRequest(Buffer.from(bodyStr));
     const headers = this.mergeHeaders({
-      'content-type': 'application/json',
-      ...executionHeaders
+      'Content-Type': 'application/json',
+      ...executionHeaders,
+      ...authHeaders
     });
 
     const request = axios
-      .post(`${uiApiBaseUrl}/executions/note`, payload, {
+      .post(`${uiApiBaseUrl}/executions/note`, bodyStr, {
         headers,
         timeout: devMode ? 5000 : 10000,
         httpAgent,
