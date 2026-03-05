@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.45-rc.6] - 2026-03-05
+
+
+### Added
+
+- Feat(ui): improve duration display in workflow and execution tables (#223)
+
+* feat(ui): improve duration display in workflow and execution tables
+
+- Add formatDurationHumanReadable() utility for human-readable durations
+  (e.g., '1h 2m' instead of '3748.3s')
+- Add LiveElapsedDuration component that ticks every second for running items
+  instead of showing static '-' dash
+- Update WorkflowsTable, CompactWorkflowsTable, CompactExecutionsTable,
+  and EnhancedExecutionsTable to use new duration formatting
+- Fix 'as any' type assertion in CompactExecutionsTable status prop
+
+Closes #222
+
+* docs: add screenshots for duration display PR (aa02ea1)
+
 ## [0.1.45-rc.5] - 2026-03-05
 
 
