@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.45-rc.7] - 2026-03-05
+
+
+### Added
+
+- Feat(ui): display both did:key and did:web identities (#226)
+
+* feat(ui): display both did:key and did:web identities with clear distinction
+
+The UI previously only showed did:key identifiers, making did:web
+identities invisible to users who need them for JWT and external
+integrations.
+
+Backend: Wire DIDWebService into UI DIDHandler and return did_web
+in the node DID API response.
+
+Frontend: Show both identity types as clearly separated sections
+with descriptive labels — "Cryptographic Identity" (did:key) for
+signing/auth, and "Web Identity" (did:web) for JWT/external use.
+Each has its own copy button and View Document action.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(ui): add did:web to identity API and fix unused import
+
+Wire DIDWebService into IdentityHandlers so the DID Explorer page
+returns did_web alongside did:key. Remove unused Analytics import
+that was breaking CI builds.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (8ffdc28)
+
 ## [0.1.45-rc.6] - 2026-03-05
 
 
