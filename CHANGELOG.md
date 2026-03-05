@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.45-rc.5] - 2026-03-05
+
+
+### Added
+
+- Feat(ai): retry LLM calls on malformed structured output JSON (#224)
+
+When using schema-based structured output, LLMs occasionally return
+malformed JSON that fails parsing. This adds automatic retry (up to 2
+retries) specifically for parse failures, avoiding unnecessary retries
+for network or API errors.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (a462b3a)
+
 ## [0.1.45-rc.4] - 2026-03-05
 
 
