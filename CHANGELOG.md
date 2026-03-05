@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.47-rc.1] - 2026-03-05
+
+
+### Documentation
+
+- Docs: add AI tool calling documentation to READMEs (#231)
+
+Document the new native LLM tool-calling feature (PR #228) in the main
+README and all three SDK READMEs with examples showing auto-discovery,
+filtered discovery, lazy hydration, guardrails, and observability.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (56bf930)
+
 ## [0.1.46] - 2026-03-05
 
 ## [0.1.46-rc.2] - 2026-03-05
