@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.47-rc.2] - 2026-03-06
+
+
+### Added
+
+- Feat: add sec-af autonomous security audit to Built With examples
+
+Adds the AI Security Auditor (sec-af) showcase to the README examples
+table with a custom editorial image and link to github.com/Agent-Field/sec-af.
+
+- Add assets/examples/ai-security-auditor.png showcase image
+- Update README Built With section with new entry, description, and GitHub link (4ee4b0a)
+
+
+
+### Fixed
+
+- Fix: include API key in note() request headers
+
+The note() method was sending execution context headers but
+not the X-API-Key, causing 401 when the control plane has
+API key auth enabled (production). Works locally because
+local dev typically has no API key configured.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com> (94725ff)
+
 ## [0.1.47-rc.1] - 2026-03-05
 
 
