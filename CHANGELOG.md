@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.48-rc.1] - 2026-03-07
+
+
+### Fixed
+
+- Fix(ui): center sidebar nav icons when collapsed (#247)
+
+Remove redundant px-2 from SidebarContent that stacked with
+SidebarGroup's built-in p-2, causing 32px of horizontal padding
+inside the 48px collapsed rail. The 32px icon buttons overflowed
+right, appearing right-justified instead of centered. (6c1eebb)
+
 ## [0.1.47] - 2026-03-06
 
 ## [0.1.47-rc.4] - 2026-03-06
