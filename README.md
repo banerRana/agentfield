@@ -41,7 +41,62 @@ AgentField is an open-source **control plane** that treats AI agents as first-cl
 
 Write [Python](https://agentfield.ai/api/python-sdk/overview), [Go](https://agentfield.ai/api/go-sdk/overview), [TypeScript](https://agentfield.ai/api/typescript-sdk/overview), or call via [REST](https://agentfield.ai/api/rest-api/overview). Get production infrastructure automatically.
 
----
+## Built With AgentField
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <a href="https://github.com/Agent-Field/SWE-AF">
+        <img src="assets/examples/autonomous-engineering-team.png" alt="Autonomous Engineering Team" />
+      </a>
+      <br/>
+      <b>Autonomous Engineering Team</b>
+      <br/>
+      <sub>One API call spins up PM, architect, coders, QA, reviewers — hundreds of coordinated agents that plan, build, test, and ship.</sub>
+      <br/><br/>
+      <a href="https://github.com/Agent-Field/SWE-AF">GitHub →</a>
+    </td>
+    <td align="center" width="33%">
+      <a href="https://github.com/Agent-Field/af-deep-research">
+        <img src="assets/examples/deep-research-engine.png" alt="Deep Research Engine" />
+      </a>
+      <br/>
+      <b>Deep Research Engine</b>
+      <br/>
+      <sub>Recursive research backend. Spawns parallel agents, evaluates quality, generates deeper agents, and recurses — 10,000+ agents per query.</sub>
+      <br/><br/>
+      <a href="https://github.com/Agent-Field/af-deep-research">GitHub →</a>
+    </td>
+    <td align="center" width="33%">
+      <a href="https://github.com/Agent-Field/af-reactive-atlas-mongodb">
+        <img src="assets/examples/reactive-database-layer.png" alt="Reactive MongoDB Intelligence" />
+      </a>
+      <br/>
+      <b>Reactive MongoDB Intelligence</b>
+      <br/>
+      <sub>Atlas Triggers + agent reasoning. Documents arrive raw and leave enriched — risk scores, pattern detection, evidence chains. No application code.</sub>
+      <br/><br/>
+      <a href="https://github.com/Agent-Field/af-reactive-atlas-mongodb">GitHub →</a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <a href="https://github.com/Agent-Field/sec-af">
+        <img src="assets/examples/ai-security-auditor.png" alt="Autonomous Security Audit" />
+      </a>
+      <br/>
+      <b>Autonomous Security Audit</b>
+      <br/>
+      <sub>250 coordinated agents trace every vulnerability source-to-sink and adversarially verify each finding. Confirmed exploits, not pattern flags — plugs into GitHub Actions CI.</sub>
+      <br/><br/>
+      <a href="https://github.com/Agent-Field/sec-af">GitHub →</a>
+    </td>
+    <td width="33%"></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+[See all examples →](https://agentfield.ai/examples)
 
 ## The AI Backend
 
@@ -53,8 +108,6 @@ We call this the AI Backend. Not a chatbot, not a copilot—infrastructure for s
 
 📖 **[Read: The AI Backend](https://agentfield.ai/blog/posts/ai-backend/?utm_source=github-readme)** — Our thesis on why every serious backend will need a reasoning layer.
 
----
-
 ## See It In Action
 
 <div align="center">
@@ -62,8 +115,6 @@ We call this the AI Backend. Not a chatbot, not a copilot—infrastructure for s
 <br/>
 <i>Real-time Observability • Execution Flow • Audit Trails</i>
 </div>
-
----
 
 ## Build Agents in Any Language
 
@@ -155,8 +206,6 @@ const result = await fetch("http://localhost:8080/api/v1/execute/researcher.summ
 [REST API Reference →](https://agentfield.ai/api/rest-api/overview)
 </details>
 
----
-
 ## Quick Start
 
 ### 1. Install
@@ -246,22 +295,6 @@ export AGENT_PUBLIC_URL="http://host.docker.internal:8001"
 
 **Next Steps:** [Build Your First Agent](https://agentfield.ai/guides/getting-started/build-your-first-agent) | [Deploy to Production](https://agentfield.ai/guides/deployment/overview) | [Examples](https://agentfield.ai/examples)
 
----
-
-## Production Examples
-
-Real-world patterns built on AgentField:
-
-| Example | Description | Links |
-|---------|-------------|-------|
-| **SWE-AF** | Autonomous software engineering factory. One API call spins up a full engineering fleet — PM, architect, coders, QA, reviewers, merger — that plans, builds, tests, and ships complex software end-to-end. Scored **95/100** with haiku, outperforming Claude Code sonnet (73) and Codex (62) on the same benchmark. Ships real PRs: [PR #179](https://github.com/Agent-Field/agentfield/pull/179) was built entirely by SWE-AF (10 issues, 217 tests passing, $19.23 total cost). | [GitHub](https://github.com/Agent-Field/SWE-AF) |
-| **Deep Research API** | Massively parallel research backend. Fans out to 10k+ agents, synthesizing verifiable strategies with deep citation chains. | [GitHub](https://github.com/Agent-Field/af-deep-research) • [Docs](https://agentfield.ai/examples) |
-| **RAG Evaluator** | Production monitoring for LLM responses. Scores across 4 dimensions to identify reliability issues. | [Architecture](https://agentfield.ai/examples/complete-agents/rag-evaluator) |
-
-[See all examples →](https://agentfield.ai/examples)
-
----
-
 ## The Production Gap
 
 Most frameworks stop at "make the LLM call." But production agents need:
@@ -292,6 +325,20 @@ analysis = await app.call("analyst.evaluate", input={"data": dataset})
 report = await app.call("writer.summarize", input={"analysis": analysis})
 ```
 
+### AI Tool Calling
+LLMs automatically discover and invoke agent capabilities. No manual tool registration—`tools="discover"` queries the control plane, converts capabilities to LLM tool schemas, dispatches calls, and feeds results back in a loop.
+
+```python
+# LLM discovers and calls tools from other agents automatically
+result = await app.ai(
+    system="You are a helpful assistant.",
+    user="What's the weather in Tokyo and calculate 42 * 17",
+    tools="discover",  # Auto-discover all available capabilities
+)
+print(result)       # Final answer from LLM
+print(result.trace) # Full observability: tool calls, latency, turns
+```
+
 ### Developer Experience
 Standard REST APIs. No magic abstractions. Build agents the way you build microservices.
 
@@ -304,8 +351,6 @@ curl -X POST http://localhost:8080/api/v1/execute/researcher.summarize \
 
 ### Enterprise Ready
 Cryptographic identity for every agent. Tamper-proof audit trails for every action. [Learn more about Identity & Trust](https://agentfield.ai/docs/core-concepts/identity-and-trust).
-
----
 
 ## A New Backend Paradigm
 
@@ -346,8 +391,6 @@ AgentField isn't a framework you extend. It's infrastructure you deploy on.
 
 **Not tool attachment.** You don't just give an LLM a bag of MCP tools and hope. You define **Reasoners** (AI logic) and **Skills** (deterministic code) with explicit boundaries. [Learn more](https://agentfield.ai/docs/core-concepts/reasoners-and-skills).
 
----
-
 ## Key Features
 
 ### Scale Infrastructure
@@ -359,6 +402,7 @@ AgentField isn't a framework you extend. It's infrastructure you deploy on.
 ### Multi-Agent Native
 - **Discovery**: Agents register capabilities. Others find them via API.
 - **Cross-Agent Calls**: `app.call("other.reasoner", input={...})` routed through control plane
+- **AI Tool Calling**: `app.ai(tools="discover")` — LLMs automatically discover and call agent capabilities
 - **Workflow DAGs**: Every execution path visualized automatically
 - **Shared Memory**: Scoped to global, agent, session, or run—with vector search
 
@@ -416,11 +460,7 @@ For compliance teams: mathematical proof, not trust.
 
 *When you're ready to ship agents to production, we'll be here.*
 
----
-
 If you are **Backend Engineers** shipping AI into production who want standard APIs, not magic or **Platform Teams** who don't want to build another homegrown orchestrator or **Enterprise Teams** in regulated industries (Finance, Health) needing audit trails or **Frontend Developers** who just want to `fetch()` an agent without Python headaches, AgentField is built for you.
-
----
 
 ## Learn More
 
@@ -428,8 +468,6 @@ If you are **Backend Engineers** shipping AI into production who want standard A
 - 📖 **[IAM for AI Backends](https://agentfield.ai/blog/posts/iam-ai-backends)** — Why agents need identity, not just API keys
 - 📚 **[Documentation](https://agentfield.ai/docs)** — Full technical reference
 - 🚀 **[Examples](https://agentfield.ai/examples)** — Production patterns and use cases
-
----
 
 ## Community
 

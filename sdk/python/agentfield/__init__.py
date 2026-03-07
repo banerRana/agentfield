@@ -2,6 +2,7 @@ from .agent import Agent
 from .router import AgentRouter
 from .types import (
     AIConfig,
+    HarnessConfig,
     CompactDiscoveryResponse,
     DiscoveryResponse,
     DiscoveryResult,
@@ -9,6 +10,7 @@ from .types import (
     ReasonerDefinition,
     SkillDefinition,
 )
+from .harness import HarnessResult
 from .multimodal import (
     Text,
     Image,
@@ -38,6 +40,14 @@ from .media_providers import (
     get_provider,
     register_provider,
 )
+from .did_auth import (
+    DIDAuthenticator,
+    create_did_auth_headers,
+    sign_request,
+    HEADER_CALLER_DID,
+    HEADER_DID_SIGNATURE,
+    HEADER_DID_TIMESTAMP,
+)
 from .exceptions import (
     AgentFieldError,
     AgentFieldClientError,
@@ -46,10 +56,21 @@ from .exceptions import (
     RegistrationError,
     ValidationError,
 )
+from .client import ApprovalRequestResponse, ApprovalResult, ApprovalStatusResponse
+from .tool_calling import (
+    ToolCallConfig,
+    ToolCallRecord,
+    ToolCallResponse,
+    ToolCallTrace,
+    capability_to_tool_schema,
+    capabilities_to_tool_schemas,
+)
 
 __all__ = [
     "Agent",
     "AIConfig",
+    "HarnessConfig",
+    "HarnessResult",
     "MemoryConfig",
     "ReasonerDefinition",
     "SkillDefinition",
@@ -84,6 +105,24 @@ __all__ = [
     "OpenRouterProvider",
     "get_provider",
     "register_provider",
+    # DID authentication
+    "DIDAuthenticator",
+    "create_did_auth_headers",
+    "sign_request",
+    "HEADER_CALLER_DID",
+    "HEADER_DID_SIGNATURE",
+    "HEADER_DID_TIMESTAMP",
+    # Approval response types
+    "ApprovalRequestResponse",
+    "ApprovalResult",
+    "ApprovalStatusResponse",
+    # Tool calling
+    "ToolCallConfig",
+    "ToolCallRecord",
+    "ToolCallResponse",
+    "ToolCallTrace",
+    "capability_to_tool_schema",
+    "capabilities_to_tool_schemas",
     # Exceptions
     "AgentFieldError",
     "AgentFieldClientError",
@@ -93,4 +132,4 @@ __all__ = [
     "ValidationError",
 ]
 
-__version__ = "0.1.42-rc.3"
+__version__ = "0.1.48-rc.1"

@@ -14,6 +14,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    TYPE_CHECKING,
     List,
     Optional,
     Set,
@@ -30,7 +31,7 @@ from agentfield.agent_mcp import AgentMCP
 from agentfield.agent_registry import clear_current_agent, set_current_agent
 from agentfield.agent_server import AgentServer
 from agentfield.agent_workflow import AgentWorkflow
-from agentfield.client import AgentFieldClient
+from agentfield.client import AgentFieldClient, ApprovalResult
 from agentfield.dynamic_skills import DynamicMCPSkillManager
 from agentfield.execution_context import (
     ExecutionContext,
@@ -38,6 +39,7 @@ from agentfield.execution_context import (
     reset_execution_context,
     set_execution_context,
 )
+from agentfield.execution_state import ExecuteError
 from agentfield.did_manager import DIDManager
 from agentfield.vc_generator import VCGenerator
 from agentfield.mcp_client import MCPClientRegistry
@@ -51,6 +53,7 @@ from agentfield.types import (
     AgentStatus,
     AIConfig,
     DiscoveryResult,
+    HarnessConfig,
     MemoryConfig,
 )
 from agentfield.multimodal_response import MultimodalResponse
@@ -64,6 +67,10 @@ from pydantic import BaseModel, ValidationError
 from dataclasses import dataclass, field
 import weakref
 
+if TYPE_CHECKING:
+    from agentfield.harness._result import HarnessResult
+    from agentfield.harness._runner import HarnessRunner
+
 # Use slots=True for memory efficiency on Python 3.10+, fallback for older versions
 _dataclass_kwargs = {"slots": True} if sys.version_info >= (3, 10) else {}
 
@@ -75,6 +82,7 @@ class ReasonerEntry:
 
     Stores only essential data; schemas generated on-demand to reduce memory.
     """
+
     id: str
     func: Callable
     input_types: Dict[str, tuple]  # (type, default) tuples - not Pydantic model
@@ -87,6 +95,7 @@ class ReasonerEntry:
 @dataclass(**_dataclass_kwargs)
 class SkillEntry:
     """Minimal skill metadata - uses __slots__ for memory efficiency."""
+
     id: str
     func: Callable
     input_types: Dict[str, tuple]  # (type, default) tuples
@@ -341,6 +350,71 @@ def _resolve_callback_url(callback_url: Optional[str], port: int) -> str:
     return f"http://localhost:{port}"
 
 
+class _PauseManager:
+    """Manages pending execution pause futures resolved via webhook callback.
+
+    Each call to ``Agent.pause()`` registers an ``asyncio.Future`` keyed by
+    ``approval_request_id``.  When the webhook route receives a resolution
+    callback from the control plane it resolves the matching future, unblocking
+    the caller.
+    """
+
+    def __init__(self) -> None:
+        self._pending: Dict[str, asyncio.Future] = {}
+        # Also track execution_id → approval_request_id for fallback resolution
+        self._exec_to_request: Dict[str, str] = {}
+        self._lock = asyncio.Lock()
+
+    async def register(self, approval_request_id: str, execution_id: str = "") -> asyncio.Future:
+        """Register a new pending pause and return the Future to await."""
+        async with self._lock:
+            if approval_request_id in self._pending:
+                return self._pending[approval_request_id]
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            self._pending[approval_request_id] = future
+            if execution_id:
+                self._exec_to_request[execution_id] = approval_request_id
+            return future
+
+    async def resolve(self, approval_request_id: str, result: "ApprovalResult") -> bool:
+        """Resolve a pending pause by approval_request_id.  Returns True if a waiter was found."""
+        async with self._lock:
+            future = self._pending.pop(approval_request_id, None)
+            # Clean up execution mapping
+            exec_id = None
+            for eid, rid in self._exec_to_request.items():
+                if rid == approval_request_id:
+                    exec_id = eid
+                    break
+            if exec_id:
+                self._exec_to_request.pop(exec_id, None)
+            if future and not future.done():
+                future.set_result(result)
+                return True
+            return False
+
+    async def resolve_by_execution_id(self, execution_id: str, result: "ApprovalResult") -> bool:
+        """Fallback: resolve by execution_id when approval_request_id is not in the callback."""
+        async with self._lock:
+            request_id = self._exec_to_request.pop(execution_id, None)
+            if request_id:
+                future = self._pending.pop(request_id, None)
+                if future and not future.done():
+                    future.set_result(result)
+                    return True
+            return False
+
+    async def cancel_all(self) -> None:
+        """Cancel all pending futures (for shutdown)."""
+        async with self._lock:
+            for future in self._pending.values():
+                if not future.done():
+                    future.cancel()
+            self._pending.clear()
+            self._exec_to_request.clear()
+
+
 class Agent(FastAPI):
     """
     AgentField Agent - FastAPI subclass for creating AI agent nodes.
@@ -396,6 +470,7 @@ class Agent(FastAPI):
         tags: Optional[List[str]] = None,
         author: Optional[Dict[str, str]] = None,
         ai_config: Optional[AIConfig] = None,
+        harness_config: Optional["HarnessConfig"] = None,
         memory_config: Optional[MemoryConfig] = None,
         dev_mode: bool = False,
         async_config: Optional[AsyncConfig] = None,
@@ -405,6 +480,8 @@ class Agent(FastAPI):
         api_key: Optional[str] = None,
         enable_mcp: bool = False,
         enable_did: bool = True,
+        local_verification: bool = False,
+        verification_refresh_interval: int = 300,
         **kwargs,
     ):
         """
@@ -525,7 +602,11 @@ class Agent(FastAPI):
         self.client = AgentFieldClient(
             base_url=agentfield_server, async_config=self.async_config, api_key=api_key
         )
+        self.client.caller_agent_id = self.node_id
         self._current_execution_context: Optional[ExecutionContext] = None
+
+        # Manages pending pause/approval futures resolved via webhook callback
+        self._pause_manager = _PauseManager()
 
         # Initialize async execution manager (will be lazily created when needed)
         self._async_execution_manager: Optional[AsyncExecutionManager] = None
@@ -538,6 +619,7 @@ class Agent(FastAPI):
 
         # Initialize AI and Memory configurations
         self.ai_config = ai_config if ai_config else AIConfig.from_env()
+        self.harness_config = harness_config
         self.memory_config = (
             memory_config
             if memory_config
@@ -567,6 +649,7 @@ class Agent(FastAPI):
         # Initialize handlers (some are lazy-loaded for performance)
         # Lazy handlers - created on first access to reduce memory footprint
         self._ai_handler: Optional[AgentAI] = None
+        self._harness_runner: Optional["HarnessRunner"] = None
         self._cli_handler: Optional[AgentCLI] = None
         # Eager handlers - required for core agent functionality
         self.mcp_handler = AgentMCP(self)
@@ -589,7 +672,9 @@ class Agent(FastAPI):
 
                 # Initialize Dynamic Skill Manager when both MCP components are available
                 if self.mcp_manager and self.mcp_client_registry:
-                    self.dynamic_skill_manager = DynamicMCPSkillManager(self, self.dev_mode)
+                    self.dynamic_skill_manager = DynamicMCPSkillManager(
+                        self, self.dev_mode
+                    )
                     if self.dev_mode:
                         log_debug("Dynamic MCP skill manager initialized")
 
@@ -604,9 +689,27 @@ class Agent(FastAPI):
         if self._enable_did:
             self._initialize_did_system()
 
+        # Initialize local verification (decentralized verification)
+        self._local_verification_enabled = local_verification
+        self._local_verifier = None
+        self._realtime_validation_functions: Set[str] = set()
+        if local_verification:
+            from agentfield.verification import LocalVerifier
+
+            self._local_verifier = LocalVerifier(
+                agentfield_url=agentfield_server,
+                refresh_interval=verification_refresh_interval,
+                api_key=api_key,
+            )
+            log_info("Local verification enabled (decentralized mode)")
+
         # Setup standard AgentField routes and memory event listeners
         self.server_handler.setup_agentfield_routes()
         self._register_memory_event_listeners()
+
+        # Add local verification middleware if enabled
+        if self._local_verifier is not None:
+            self._add_local_verification_middleware()
 
         # Register this agent instance for automatic workflow tracking
         set_current_agent(self)
@@ -635,6 +738,14 @@ class Agent(FastAPI):
         if self._ai_handler is None:
             self._ai_handler = AgentAI(self)
         return self._ai_handler
+
+    @property
+    def harness_runner(self) -> "HarnessRunner":
+        if self._harness_runner is None:
+            from agentfield.harness._runner import HarnessRunner
+
+            self._harness_runner = HarnessRunner(self.harness_config)
+        return self._harness_runner
 
     @property
     def cli_handler(self) -> AgentCLI:
@@ -673,7 +784,9 @@ class Agent(FastAPI):
         """Allow setting skills for backward compatibility (deprecated)."""
         self._skills_legacy = value
 
-    def _entry_to_metadata(self, entry: Union[ReasonerEntry, SkillEntry], kind: str) -> Dict:
+    def _entry_to_metadata(
+        self, entry: Union[ReasonerEntry, SkillEntry], kind: str
+    ) -> Dict:
         """Convert a registry entry to legacy metadata dict format with on-demand schema generation."""
         # Generate input schema from stored types
         input_schema = self._types_to_json_schema(entry.input_types)
@@ -686,9 +799,14 @@ class Agent(FastAPI):
             "input_schema": input_schema,
             "output_schema": output_schema,
             "memory_config": self.memory_config.to_dict(),
-            "return_type_hint": getattr(entry.output_type, "__name__", str(entry.output_type)),
+            "return_type_hint": getattr(
+                entry.output_type, "__name__", str(entry.output_type)
+            ),
             "tags": entry.tags,
-            "vc_enabled": entry.vc_enabled if entry.vc_enabled is not None else self._agent_vc_enabled,
+            "proposed_tags": entry.tags,
+            "vc_enabled": entry.vc_enabled
+            if entry.vc_enabled is not None
+            else self._agent_vc_enabled,
         }
         return metadata
 
@@ -738,7 +856,10 @@ class Agent(FastAPI):
         origin = getattr(typ, "__origin__", None)
         if origin is list:
             args = getattr(typ, "__args__", (Any,))
-            return {"type": "array", "items": self._type_to_json_schema(args[0]) if args else {}}
+            return {
+                "type": "array",
+                "items": self._type_to_json_schema(args[0]) if args else {},
+            }
         if origin is dict:
             return {"type": "object", "additionalProperties": True}
         if origin is Union:
@@ -752,7 +873,9 @@ class Agent(FastAPI):
         # Default fallback
         return {"type": "object"}
 
-    def _validate_handler_input(self, data: dict, input_types: Dict[str, tuple]) -> dict:
+    def _validate_handler_input(
+        self, data: dict, input_types: Dict[str, tuple]
+    ) -> dict:
         """
         Validate input data against expected types at runtime.
 
@@ -821,11 +944,17 @@ class Agent(FastAPI):
                         result[name] = value.lower() in ("true", "1", "yes")
                     else:
                         result[name] = bool(value)
-                elif actual_type is dict or getattr(actual_type, "__origin__", None) is dict:
+                elif (
+                    actual_type is dict
+                    or getattr(actual_type, "__origin__", None) is dict
+                ):
                     if not isinstance(value, dict):
                         raise ValueError(f"Field '{name}' must be a dict")
                     result[name] = dict(value)
-                elif actual_type is list or getattr(actual_type, "__origin__", None) is list:
+                elif (
+                    actual_type is list
+                    or getattr(actual_type, "__origin__", None) is list
+                ):
                     if not isinstance(value, list):
                         raise ValueError(f"Field '{name}' must be a list")
                     result[name] = list(value)
@@ -840,7 +969,9 @@ class Agent(FastAPI):
 
         return result
 
-    def handle_serverless(self, event: dict, adapter: Optional[Callable] = None) -> dict:
+    def handle_serverless(
+        self, event: dict, adapter: Optional[Callable] = None
+    ) -> dict:
         """
         Universal serverless handler for executing reasoners and skills.
 
@@ -1057,12 +1188,15 @@ class Agent(FastAPI):
         """Scans for methods decorated with @on_change and registers them as listeners."""
         if not self.memory_event_client:
             self.memory_event_client = MemoryEventClient(
-                self.agentfield_server, self._get_current_execution_context(), self.api_key
+                self.agentfield_server,
+                self._get_current_execution_context(),
+                self.api_key,
             )
 
-        for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
-            if hasattr(method, "_memory_event_listener"):
-                patterns = getattr(method, "_memory_event_patterns", [])
+        for name, fn in inspect.getmembers(type(self), predicate=inspect.isfunction):
+            if hasattr(fn, "_memory_event_listener"):
+                method = getattr(self, name)
+                patterns = getattr(fn, "_memory_event_patterns", [])
 
                 async def listener(event):
                     # This is a simplified listener, a more robust implementation
@@ -1176,7 +1310,9 @@ class Agent(FastAPI):
         )
         if not self.memory_event_client:
             self.memory_event_client = MemoryEventClient(
-                self.agentfield_server, self._get_current_execution_context(), self.api_key
+                self.agentfield_server,
+                self._get_current_execution_context(),
+                self.api_key,
             )
         return MemoryInterface(memory_client, self.memory_event_client)
 
@@ -1219,7 +1355,10 @@ class Agent(FastAPI):
             return thread_local_ctx
         # Only return agent-level context if it was set during an actual execution
         # (i.e., has registered=True), not the default context created at init time
-        if self._current_execution_context and self._current_execution_context.registered:
+        if (
+            self._current_execution_context
+            and self._current_execution_context.registered
+        ):
             return self._current_execution_context
         return None
 
@@ -1345,11 +1484,10 @@ class Agent(FastAPI):
                     error_message=error_message,
                     duration_ms=duration_ms,
                 )
-                if vc and self.dev_mode:
-                    log_debug(f"Generated VC {vc.vc_id} for {function_name}")
+                if vc:
+                    log_info(f"Generated VC {vc.vc_id} for {function_name}")
         except Exception as e:
-            if self.dev_mode:
-                log_error(f"Failed to generate VC for {function_name}: {e}")
+            log_warn(f"Failed to generate VC for {function_name}: {e}")
 
     def _build_callback_discovery_payload(self) -> Optional[Dict[str, Any]]:
         """Prepare discovery metadata for agent registration."""
@@ -1457,12 +1595,23 @@ class Agent(FastAPI):
                 self.did_enabled = True
                 if self.dev_mode:
                     log_debug(f"DID registration successful for agent: {self.node_id}")
+
+                # Wire DID credentials to the HTTP client for request signing
+                agent_did = self.did_manager.get_agent_did()
+                agent_private_key = None
+                if self.did_manager.identity_package:
+                    agent_private_key = (
+                        self.did_manager.identity_package.agent_did.private_key_jwk
+                    )
+                if agent_did and agent_private_key:
+                    self.client.set_did_credentials(agent_did, agent_private_key)
+
                 # Enable VC generation
                 if self.vc_generator:
                     self.vc_generator.set_enabled(True)
                 if self.dev_mode:
                     log_info(f"Agent {self.node_id} registered with DID system")
-                    log_info(f"DID: {self.did_manager.get_agent_did()}")
+                    log_info(f"DID: {agent_did}")
             else:
                 if self.dev_mode:
                     log_warn(f"Failed to register agent {self.node_id} with DID system")
@@ -1492,6 +1641,7 @@ class Agent(FastAPI):
         tags: Optional[List[str]] = None,
         *,
         vc_enabled: Optional[bool] = None,
+        require_realtime_validation: bool = False,
     ):
         """
         Decorator to register a reasoner function.
@@ -1522,7 +1672,10 @@ class Agent(FastAPI):
             # Extract function metadata
             func_name = func.__name__
             reasoner_id = decorator_name or func_name
-            endpoint_path = decorator_path or f"/reasoners/{func_name}"
+            if decorator_path:
+                endpoint_path = decorator_path if decorator_path.startswith("/reasoners/") else f"/reasoners/{decorator_path.lstrip('/')}"
+            else:
+                endpoint_path = f"/reasoners/{reasoner_id}"
 
             # Get type hints for input/output schemas
             type_hints = get_type_hints(func)
@@ -1545,6 +1698,8 @@ class Agent(FastAPI):
 
             # Persist VC override preference
             self._set_reasoner_vc_override(reasoner_id, vc_enabled)
+            if require_realtime_validation:
+                self._realtime_validation_functions.add(reasoner_id)
 
             # Get output schema from return type hint
             return_type = type_hints.get("return", dict)
@@ -1566,7 +1721,9 @@ class Agent(FastAPI):
 
                 # Validate input at runtime (replaces Pydantic validation)
                 try:
-                    validated_input = self._validate_handler_input(body, handler_input_fields)
+                    validated_input = self._validate_handler_input(
+                        body, handler_input_fields
+                    )
                 except ValueError as e:
                     return JSONResponse(
                         status_code=422,
@@ -1604,7 +1761,9 @@ class Agent(FastAPI):
             # 🔥 ENHANCED: Comprehensive function replacement for unified tracking
             # Use weakref to avoid circular reference: Agent → tracked_func → Agent
             original_func = func
-            workflow_ref = weakref.ref(self.workflow_handler) if self.workflow_handler else None
+            workflow_ref = (
+                weakref.ref(self.workflow_handler) if self.workflow_handler else None
+            )
 
             async def tracked_func(*args, **kwargs):
                 """Enhanced tracked function with unified execution pipeline and context inheritance.
@@ -1809,6 +1968,28 @@ class Agent(FastAPI):
                     parent_execution_id=execution_context.parent_execution_id,
                 )
             raise cancel_err
+        except ExecuteError as exec_err:
+            # Propagate upstream HTTP status codes from cross-agent calls.
+            # Without this, a 403 from the inner call would become 500
+            # (unhandled exception) and then 502 at the outer control plane.
+            if hasattr(self, "workflow_handler") and self.workflow_handler:
+                end_time = time.time()
+                await self.workflow_handler.notify_call_error(
+                    execution_context.execution_id,
+                    execution_context.workflow_id,
+                    str(exec_err),
+                    int((end_time - start_time) * 1000),
+                    execution_context,
+                    input_data=payload_dict,
+                    parent_execution_id=execution_context.parent_execution_id,
+                )
+            detail = {"error": str(exec_err)}
+            if exec_err.error_details:
+                detail["error_details"] = exec_err.error_details
+            raise HTTPException(
+                status_code=exec_err.status_code,
+                detail=detail,
+            )
         except HTTPException as http_exc:
             if hasattr(self, "workflow_handler") and self.workflow_handler:
                 end_time = time.time()
@@ -1868,9 +2049,11 @@ class Agent(FastAPI):
             }
             log_info(f"Execution {execution_id} completed asynchronously")
         except Exception as exc:
+            error_details = getattr(exc, "error_details", None)
             payload = {
                 "status": "failed",
                 "error": str(exc),
+                "error_details": error_details,
                 "duration_ms": int((time.time() - start_time) * 1000),
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "execution_id": execution_id,
@@ -1998,6 +2181,7 @@ class Agent(FastAPI):
         name: Optional[str] = None,
         *,
         vc_enabled: Optional[bool] = None,
+        require_realtime_validation: bool = False,
     ):
         """
         Decorator to register a skill function.
@@ -2110,8 +2294,10 @@ class Agent(FastAPI):
             # Extract function metadata
             func_name = func.__name__
             skill_id = decorator_name or func_name
-            endpoint_path = decorator_path or f"/skills/{func_name}"
+            endpoint_path = decorator_path or f"/skills/{skill_id}"
             self._set_skill_vc_override(skill_id, vc_enabled)
+            if require_realtime_validation:
+                self._realtime_validation_functions.add(skill_id)
 
             # Get type hints for input schema
             type_hints = get_type_hints(func)
@@ -2150,7 +2336,9 @@ class Agent(FastAPI):
 
                 # Validate input at runtime (replaces Pydantic validation)
                 try:
-                    validated_input = self._validate_handler_input(body, handler_input_fields)
+                    validated_input = self._validate_handler_input(
+                        body, handler_input_fields
+                    )
                 except ValueError as e:
                     return JSONResponse(
                         status_code=422,
@@ -2718,6 +2906,60 @@ class Agent(FastAPI):
             **kwargs,
         )
 
+    async def harness(
+        self,
+        prompt: str,
+        *,
+        schema: Any = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        max_turns: Optional[int] = None,
+        max_budget_usd: Optional[float] = None,
+        tools: Optional[List[str]] = None,
+        permission_mode: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None,
+        **kwargs,
+    ) -> "HarnessResult":
+        """
+        Dispatch a task to an external coding agent and return structured results.
+
+        Works like `.ai()` but delegates to a coding agent that can read, write, and edit
+        files with optional schema-constrained output.
+
+        Args:
+            prompt: Task description for the coding agent.
+            schema: Pydantic BaseModel class for structured output validation.
+            provider: Override provider ("claude-code", "codex", "gemini", "opencode").
+            model: Override model identifier.
+            max_turns: Maximum agent iterations.
+            max_budget_usd: Cost cap in USD.
+            tools: Allowed tools list.
+            permission_mode: Permission mode ("plan", "auto", None).
+            system_prompt: System prompt for the agent.
+            env: Environment variables for the agent.
+            cwd: Working directory for the agent.
+            **kwargs: Additional provider-specific options.
+
+        Returns:
+            HarnessResult with .result (text), .parsed (validated schema), .text property.
+        """
+        return await self.harness_runner.run(
+            prompt,
+            schema=schema,
+            provider=provider,
+            model=model,
+            max_turns=max_turns,
+            max_budget_usd=max_budget_usd,
+            tools=tools,
+            permission_mode=permission_mode,
+            system_prompt=system_prompt,
+            env=env,
+            cwd=cwd,
+            **kwargs,
+        )
+
     def _ensure_call_semaphore(self) -> asyncio.Semaphore:
         semaphore = getattr(self, "_call_semaphore", None)
         if semaphore is None:
@@ -3241,6 +3483,12 @@ class Agent(FastAPI):
                                 f"Async execution failed: {type(async_error).__name__}: {str(async_error)}"
                             )
 
+                        # Never fall back on authorization errors (401/403) —
+                        # these are permanent failures that retrying won't fix.
+                        _err_status = getattr(async_error, "status", None)
+                        if _err_status in (401, 403):
+                            raise async_error
+
                         if not self.async_config.fallback_to_sync:
                             raise async_error
 
@@ -3399,8 +3647,9 @@ class Agent(FastAPI):
                 # Get current execution context
                 current_context = self._get_current_execution_context()
 
-                # Prepare headers with execution context
+                # Prepare headers with execution context + auth
                 headers = current_context.to_headers()
+                headers.update(self.client._get_auth_headers())
                 headers["Content-Type"] = "application/json"
 
                 # Prepare payload
@@ -3535,6 +3784,159 @@ class Agent(FastAPI):
             thread = threading.Thread(target=lambda: asyncio.run(_send_note()))
             thread.daemon = True
             thread.start()
+
+    async def pause(
+        self,
+        approval_request_id: str,
+        approval_request_url: str = "",
+        expires_in_hours: int = 72,
+        timeout: Optional[float] = None,
+        execution_id: Optional[str] = None,
+    ) -> ApprovalResult:
+        """Pause the current execution for external approval.
+
+        Transitions the execution to "waiting" on the control plane, then
+        blocks until the approval webhook callback resolves it or the timeout
+        is reached.
+
+        The agent is responsible for creating the approval request on an
+        external service (e.g. hax-sdk) *before* calling this method and
+        passing the resulting ``approval_request_id``.
+
+        Args:
+            approval_request_id: ID of the approval request on the external service.
+            approval_request_url: URL where the human can review the request.
+            expires_in_hours: Expiry passed to the control plane.
+            timeout: Max seconds to wait.  ``None`` defaults to ``expires_in_hours``.
+            execution_id: Override the current execution.  Defaults to active context.
+
+        Returns:
+            ApprovalResult with the human's decision and feedback.
+            If the timeout elapses without resolution, returns
+            ``ApprovalResult(decision="expired")``.
+
+        Raises:
+            AgentFieldClientError: If the control plane request fails.
+            RuntimeError: If the agent is not serving (no callback URL).
+        """
+        from agentfield.exceptions import AgentFieldClientError
+
+        # Resolve execution_id from context if not provided
+        if not execution_id:
+            ctx = self._get_current_execution_context()
+            execution_id = ctx.execution_id
+
+        if not execution_id:
+            raise AgentFieldClientError("No execution_id available — cannot pause")
+
+        # Build the callback URL from the agent's base URL
+        if not self.base_url:
+            raise RuntimeError(
+                "Agent is not serving — call app.serve() before app.pause(). "
+                "The callback URL is required for the control plane to notify "
+                "the agent when the approval resolves."
+            )
+        callback_url = f"{self.base_url}/webhooks/approval"
+
+        # Register a future *before* telling the CP, so we don't miss a fast callback
+        future = await self._pause_manager.register(approval_request_id, execution_id)
+
+        # Tell the CP to transition to "waiting"
+        try:
+            await self.client.request_approval(
+                execution_id=execution_id,
+                approval_request_id=approval_request_id,
+                approval_request_url=approval_request_url,
+                callback_url=callback_url,
+                expires_in_hours=expires_in_hours,
+            )
+        except Exception:
+            # Clean up the future if we couldn't even tell the CP
+            await self._pause_manager.resolve(
+                approval_request_id,
+                ApprovalResult(decision="error", feedback="failed to notify control plane",
+                               execution_id=execution_id, approval_request_id=approval_request_id),
+            )
+            raise
+
+        self.note(
+            f"Execution paused — waiting for approval {approval_request_id}",
+            tags=["approval", "waiting"],
+        )
+
+        effective_timeout = timeout if timeout is not None else expires_in_hours * 3600.0
+        try:
+            result = await asyncio.wait_for(future, timeout=effective_timeout)
+        except asyncio.TimeoutError:
+            # Timeout is a normal outcome — return an "expired" result instead of raising.
+            expired_result = ApprovalResult(
+                decision="expired",
+                feedback="timed out waiting for approval",
+                execution_id=execution_id,
+                approval_request_id=approval_request_id,
+            )
+            await self._pause_manager.resolve(approval_request_id, expired_result)
+            return expired_result
+
+        return result
+
+    async def wait_for_resume(
+        self,
+        approval_request_id: str,
+        execution_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> ApprovalResult:
+        """Wait for a previously-initiated pause to resolve.
+
+        Use for crash recovery: the approval was already requested (the
+        execution is already ``waiting`` on the CP) and we just need to wait
+        for the callback.  Does *not* call the CP again.
+
+        If the webhook callback does not arrive within *timeout*, falls back to
+        a single status poll via the control plane.
+
+        Args:
+            approval_request_id: The known approval request ID to wait for.
+            execution_id: Execution ID.  Defaults to active context.
+            timeout: Max seconds to wait.
+
+        Returns:
+            ApprovalResult with the resolution.
+        """
+        from agentfield.exceptions import AgentFieldClientError
+
+        if not execution_id:
+            ctx = self._get_current_execution_context()
+            execution_id = ctx.execution_id
+
+        future = await self._pause_manager.register(approval_request_id, execution_id or "")
+
+        effective_timeout = timeout if timeout is not None else 72 * 3600.0
+        try:
+            result = await asyncio.wait_for(future, timeout=effective_timeout)
+            return result
+        except asyncio.TimeoutError:
+            pass
+
+        # Fallback: poll CP once
+        try:
+            status_resp = await self.client.get_approval_status(execution_id or "")
+            if status_resp.status != "pending":
+                return ApprovalResult(
+                    decision=status_resp.status,
+                    execution_id=execution_id or "",
+                    approval_request_id=approval_request_id,
+                    raw_response=status_resp.response,
+                )
+        except AgentFieldClientError:
+            pass
+
+        return ApprovalResult(
+            decision="expired",
+            feedback="approval timed out without response",
+            execution_id=execution_id or "",
+            approval_request_id=approval_request_id,
+        )
 
     def _get_current_execution_context(self) -> ExecutionContext:
         """
@@ -3871,6 +4273,124 @@ class Agent(FastAPI):
         else:
             # Run in server mode
             self.serve(**serve_kwargs)
+
+    def _add_local_verification_middleware(self):
+        """Add FastAPI middleware for local DID signature verification."""
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import JSONResponse as StarletteJSONResponse
+
+        agent = self
+
+        class LocalVerificationMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                path = request.url.path
+
+                # Only verify execution endpoints (reasoners and skills)
+                if not (path.startswith("/reasoners/") or path.startswith("/skills/")):
+                    return await call_next(request)
+
+                verifier = agent._local_verifier
+                if verifier is None:
+                    return await call_next(request)
+
+                # Extract function name from path
+                parts = path.strip("/").split("/")
+                function_name = parts[-1] if len(parts) >= 2 else ""
+
+                # Check if function requires realtime validation (skip local)
+                if function_name in agent._realtime_validation_functions:
+                    return await call_next(request)
+
+                # Refresh cache if stale
+                if verifier.needs_refresh:
+                    try:
+                        await verifier.refresh()
+                    except Exception as e:
+                        log_warn(f"Failed to refresh local verifier cache: {e}")
+
+                # Extract DID auth headers
+                caller_did = request.headers.get("X-Caller-DID", "")
+                signature = request.headers.get("X-DID-Signature", "")
+                timestamp = request.headers.get("X-DID-Timestamp", "")
+                nonce = request.headers.get("X-DID-Nonce", "")
+
+                # C4: DID authentication is required for all execution endpoints
+                if not caller_did:
+                    return StarletteJSONResponse(
+                        status_code=401,
+                        content={
+                            "error": "did_auth_required",
+                            "message": "DID authentication required for this endpoint",
+                        },
+                    )
+
+                # C5: Signature is required when caller DID is provided
+                if not signature:
+                    return StarletteJSONResponse(
+                        status_code=401,
+                        content={
+                            "error": "signature_required",
+                            "message": "DID signature required when caller DID is provided",
+                        },
+                    )
+
+                # Check revocation
+                if verifier.check_revocation(caller_did):
+                    return StarletteJSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "did_revoked",
+                            "message": f"Caller DID {caller_did} has been revoked",
+                        },
+                    )
+
+                # Check registration — reject DIDs not registered with the control plane
+                if not verifier.check_registration(caller_did):
+                    return StarletteJSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "did_not_registered",
+                            "message": f"Caller DID {caller_did} is not registered with the control plane",
+                        },
+                    )
+
+                # Verify signature
+                body = await request.body()
+                if not verifier.verify_signature(
+                    caller_did, signature, timestamp, body, nonce
+                ):
+                    return StarletteJSONResponse(
+                        status_code=401,
+                        content={
+                            "error": "signature_invalid",
+                            "message": "DID signature verification failed",
+                        },
+                    )
+
+                # C6: Evaluate access policies
+                # Caller tags cannot be resolved at agent-side middleware level
+                # (would require a control plane lookup). Pass empty array — policies
+                # that require specific caller tags will not match, which is correct
+                # fail-open behavior. The control plane remains the primary policy
+                # enforcement point with full caller context.
+                agent_tags = getattr(agent, "agent_tags", []) or []
+                func_name = (
+                    request.url.path.rstrip("/").split("/")[-1]
+                    if request.url.path
+                    else ""
+                )
+                if not verifier.evaluate_policy([], agent_tags, func_name, {}):
+                    return StarletteJSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "policy_denied",
+                            "message": "Access denied by cached policy",
+                        },
+                    )
+
+                return await call_next(request)
+
+        self.add_middleware(LocalVerificationMiddleware)
 
     def serve(  # pragma: no cover - requires full server runtime integration
         self,

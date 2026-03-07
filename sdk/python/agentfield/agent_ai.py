@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Type, Unio
 
 if TYPE_CHECKING:
     from agentfield.multimodal_response import MultimodalResponse
+    from agentfield.tool_calling import ToolCallConfig
 
 import requests
 from agentfield.agent_utils import AgentUtils
@@ -27,11 +28,14 @@ def _get_litellm():
     if _litellm is None:
         try:
             import litellm
+
             litellm.suppress_debug_info = True
             _litellm = litellm
         except Exception:  # pragma: no cover
+
             class _LiteLLMStub:
                 pass
+
             _litellm = _LiteLLMStub()
     return _litellm
 
@@ -42,11 +46,14 @@ def _get_openai():
     if _openai is None:
         try:
             import openai
+
             _openai = openai
         except Exception:  # pragma: no cover
+
             class _OpenAIStub:
                 class OpenAI:
                     pass
+
             _openai = _OpenAIStub()
     return _openai
 
@@ -54,6 +61,7 @@ def _get_openai():
 # Backward compatibility: expose as module-level but with lazy loading
 class _LazyModule:
     """Lazy module proxy that defers import until attribute access."""
+
     def __init__(self, loader):
         self._loader = loader
         self._module = None
@@ -159,6 +167,16 @@ class AgentAI:
         response_format: Optional[Union[Literal["auto", "json", "text"], Dict]] = None,
         context: Optional[Dict] = None,
         memory_scope: Optional[List[str]] = None,
+        tools: Optional[
+            Union[
+                Literal["discover"],
+                ToolCallConfig,
+                Dict[str, Any],
+                List[Any],
+            ]
+        ] = None,
+        max_turns: Optional[int] = None,
+        max_tool_calls: Optional[int] = None,
         **kwargs,
     ) -> Any:
         """
@@ -185,6 +203,14 @@ class AgentAI:
             response_format (str, optional): Desired response format ('auto', 'json', 'text').
             context (Dict, optional): Additional context data to pass to the LLM.
             memory_scope (List[str], optional): Memory scopes to inject (e.g., ['workflow', 'session', 'reasoner']).
+            tools: Tool definitions for LLM tool calling. Accepts:
+                - "discover": auto-discover all tools from the control plane
+                - DiscoveryResponse: use pre-fetched discovery results
+                - list of capabilities: ReasonerCapability/SkillCapability/AgentCapability
+                - list of dicts: raw OpenAI-format tool schemas
+                - ToolCallConfig or dict: discover with filtering/progressive options
+            max_turns (int, optional): Maximum LLM turns in the tool-call loop (default: 10).
+            max_tool_calls (int, optional): Maximum total tool calls allowed (default: 25).
             **kwargs: Additional provider-specific parameters to pass to the LLM.
 
         Returns:
@@ -312,16 +338,26 @@ class AgentAI:
         await self._ensure_model_limits_cached()
 
         # Apply prompt trimming using LiteLLM's token-aware utility when available.
-        utils_module = getattr(litellm_module, "utils", None) if litellm_module else None
-        token_counter = getattr(utils_module, "token_counter", None) if utils_module else None
-        trim_messages = getattr(utils_module, "trim_messages", None) if utils_module else None
+        utils_module = (
+            getattr(litellm_module, "utils", None) if litellm_module else None
+        )
+        token_counter = (
+            getattr(utils_module, "token_counter", None) if utils_module else None
+        )
+        trim_messages = (
+            getattr(utils_module, "trim_messages", None) if utils_module else None
+        )
 
         if token_counter is None:
+
             def token_counter(model: str, messages: List[dict]) -> int:
                 return len(json.dumps(messages))
 
         if trim_messages is None:
-            def trim_messages(messages: List[dict], model: str, max_tokens: int) -> List[dict]:
+
+            def trim_messages(
+                messages: List[dict], model: str, max_tokens: int
+            ) -> List[dict]:
                 return messages
 
         # Determine model context length using multiple fallback strategies
@@ -389,8 +425,103 @@ class AgentAI:
         litellm_params["messages"] = messages
 
         if schema:
-            # Use LiteLLM's native Pydantic model support for structured outputs
-            litellm_params["response_format"] = schema
+            # Convert Pydantic model to JSON schema format for LiteLLM
+            # This workaround prevents "Object of type ModelMetaclass is not JSON serializable" error
+            # See: https://github.com/BerriAI/litellm/issues/6830
+            litellm_params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "schema": schema.model_json_schema(),
+                    "name": schema.__name__,
+                    "strict": True,
+                },
+            }
+
+        # Tool-calling loop: if tools= is provided, enter the discover->call loop
+        if tools is not None:
+            # Streaming is not supported with tool-calling
+            if final_config.stream:
+                raise ValueError(
+                    "Streaming is not supported with tool-calling. "
+                    "Use tools= OR stream=True, not both."
+                )
+
+            from agentfield.tool_calling import (
+                ToolCallResponse,
+                _build_tool_config,
+                execute_tool_call_loop,
+            )
+
+            tool_schemas, tool_config, needs_lazy = _build_tool_config(
+                tools, self.agent
+            )
+
+            # Apply per-call overrides
+            if max_turns is not None:
+                tool_config.max_turns = max_turns
+            if max_tool_calls is not None:
+                tool_config.max_tool_calls = max_tool_calls
+
+            async def _tool_loop_completion(params):
+                """Make an LLM call with rate limiting and model fallbacks."""
+                if litellm_module is None:
+                    raise ImportError(
+                        "litellm is not installed. Please install it with `pip install litellm`."
+                    )
+
+                async def _make_call():
+                    return await litellm_module.acompletion(**params)
+
+                async def _call_with_fallbacks():
+                    fallback_models = getattr(final_config, "fallback_models", None)
+                    if not fallback_models and getattr(
+                        final_config, "final_fallback_model", None
+                    ):
+                        fallback_models = [final_config.final_fallback_model]
+
+                    if fallback_models:
+                        all_models = [params.get("model", final_config.model)] + list(
+                            fallback_models
+                        )
+                        last_exception = None
+                        for m in all_models:
+                            try:
+                                params["model"] = m
+                                return await _make_call()
+                            except Exception as e:
+                                log_debug(
+                                    f"Tool loop: model {m} failed with {e}, trying next..."
+                                )
+                                last_exception = e
+                                continue
+                        if last_exception:
+                            raise last_exception
+                    return await _make_call()
+
+                if final_config.enable_rate_limit_retry:
+                    rate_limiter = self._get_rate_limiter()
+                    return await rate_limiter.execute_with_retry(_call_with_fallbacks)
+                return await _call_with_fallbacks()
+
+            resp, trace = await execute_tool_call_loop(
+                agent=self.agent,
+                messages=messages,
+                tools=tool_schemas,
+                config=tool_config,
+                needs_lazy_hydration=needs_lazy,
+                litellm_params=litellm_params,
+                make_completion=_tool_loop_completion,
+            )
+
+            if schema:
+                try:
+                    content = resp.choices[0].message.content
+                    json_data = json.loads(str(content))
+                    return schema(**json_data)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            return ToolCallResponse(resp, trace)
 
         # Define the LiteLLM call function for rate limiter
         async def _make_litellm_call():
@@ -441,53 +572,52 @@ class AgentAI:
                     )
                 return await _make_litellm_call()
 
-        if final_config.enable_rate_limit_retry:
-            rate_limiter = self._get_rate_limiter()
-            try:
-                response = await rate_limiter.execute_with_retry(
-                    _execute_with_fallbacks
-                )
-            except Exception as e:
-                log_debug(f"LiteLLM call failed after retries: {e}")
-                raise
-        else:
-            try:
-                response = await _execute_with_fallbacks()
-            except HTTPStatusError as e:
-                log_debug(
-                    f"LiteLLM HTTP call failed: {e.response.status_code} - {e.response.text}"
-                )
-                raise
-            except requests.exceptions.RequestException as e:
-                log_debug(f"LiteLLM network call failed: {e}")
-                if e.response is not None:
-                    log_debug(f"Response status: {e.response.status_code}")
-                    log_debug(f"Response text: {e.response.text}")
-                raise
-            except Exception as e:
-                log_debug(f"LiteLLM call failed: {e}")
-                raise
+        # Maximum retries for transient parse failures (malformed JSON from LLM)
+        max_parse_retries = 2
 
-        # Process the response
-        if final_config.stream:
-            # For streaming, return the generator
-            return response
-        else:
-            # Import multimodal response detection
+        async def _execute_and_parse():
+            """Execute LLM call and parse response. Raised ValueError triggers parse retry."""
+            if final_config.enable_rate_limit_retry:
+                rate_limiter = self._get_rate_limiter()
+                try:
+                    resp = await rate_limiter.execute_with_retry(
+                        _execute_with_fallbacks
+                    )
+                except Exception as e:
+                    log_debug(f"LiteLLM call failed after retries: {e}")
+                    raise
+            else:
+                try:
+                    resp = await _execute_with_fallbacks()
+                except HTTPStatusError as e:
+                    log_debug(
+                        f"LiteLLM HTTP call failed: {e.response.status_code} - {e.response.text}"
+                    )
+                    raise
+                except requests.exceptions.RequestException as e:
+                    log_debug(f"LiteLLM network call failed: {e}")
+                    if e.response is not None:
+                        log_debug(f"Response status: {e.response.status_code}")
+                        log_debug(f"Response text: {e.response.text}")
+                    raise
+                except Exception as e:
+                    log_debug(f"LiteLLM call failed: {e}")
+                    raise
+
+            if final_config.stream:
+                return resp
+
             from .multimodal_response import detect_multimodal_response
 
-            # Detect and wrap multimodal content
-            multimodal_response = detect_multimodal_response(response)
+            multimodal_response = detect_multimodal_response(resp)
 
             if schema:
-                # For schema responses, try to parse from text content
                 try:
                     json_data = json.loads(str(multimodal_response.text))
                     return schema(**json_data)
                 except (json.JSONDecodeError, ValueError) as parse_error:
                     log_error(f"Failed to parse JSON response: {parse_error}")
                     log_debug(f"Raw response: {multimodal_response.text}")
-                    # Fallback: try to extract JSON from the response
                     json_match = re.search(
                         r"\{.*\}", str(multimodal_response.text), re.DOTALL
                     )
@@ -501,8 +631,23 @@ class AgentAI:
                         f"Could not parse structured response: {multimodal_response.text}"
                     )
 
-            # Return MultimodalResponse for backward compatibility and enhanced features
             return multimodal_response
+
+        # Retry on parse failures (malformed LLM JSON output)
+        last_parse_error = None
+        for attempt in range(max_parse_retries + 1):
+            try:
+                return await _execute_and_parse()
+            except ValueError as e:
+                if schema and "Could not parse structured response" in str(e):
+                    last_parse_error = e
+                    if attempt < max_parse_retries:
+                        log_debug(
+                            f"Parse retry {attempt + 1}/{max_parse_retries}: LLM returned malformed JSON, retrying..."
+                        )
+                        continue
+                raise
+        raise last_parse_error
 
     def _process_multimodal_args(self, args: tuple) -> List[Dict[str, Any]]:
         """Process multimodal arguments into LiteLLM-compatible message format"""

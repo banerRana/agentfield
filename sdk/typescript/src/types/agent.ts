@@ -3,6 +3,7 @@ import type { ReasonerDefinition } from './reasoner.js';
 import type { SkillDefinition } from './skill.js';
 import type { MemoryChangeEvent, MemoryWatchHandler } from '../memory/MemoryInterface.js';
 import type { ExecutionMetadata } from '../context/ExecutionContext.js';
+import type { HarnessConfig } from '../harness/types.js';
 
 export type DeploymentType = 'long_running' | 'serverless';
 
@@ -15,14 +16,23 @@ export interface AgentConfig {
   host?: string;
   publicUrl?: string;
   aiConfig?: AIConfig;
+  harnessConfig?: HarnessConfig;
   memoryConfig?: MemoryConfig;
   didEnabled?: boolean;
   devMode?: boolean;
   heartbeatIntervalMs?: number;
   defaultHeaders?: Record<string, string | number | boolean | undefined>;
   apiKey?: string;
+  did?: string;
+  privateKeyJwk?: string;
   mcp?: MCPConfig;
   deploymentType?: DeploymentType;
+  /** Enable decentralized local verification of incoming DID signatures. */
+  localVerification?: boolean;
+  /** Cache refresh interval for local verification in seconds (default: 300). */
+  verificationRefreshInterval?: number;
+  /** Agent-level tags for tag-based authorization policies. */
+  tags?: string[];
 }
 
 export interface AIConfig {
