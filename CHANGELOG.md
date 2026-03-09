@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.48-rc.4] - 2026-03-09
+
+
+### Fixed
+
+- Fix(sdk): catch Pydantic ValidationError in structured output parsing
+
+Pydantic v2 ValidationError does not inherit from ValueError, so schema
+validation failures (e.g. missing required fields) were not caught by
+the retry logic. This caused LLM responses with incomplete JSON to crash
+the execution instead of retrying.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com> (e2330d9)
+
 ## [0.1.48-rc.3] - 2026-03-09
 
 
