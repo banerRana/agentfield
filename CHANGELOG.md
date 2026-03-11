@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.51-rc.1] - 2026-03-11
+
+
+### Fixed
+
+- Fix: add config_management to connector capability env var map (#257)
+
+The connectorCapEnvMap was missing the config_management capability,
+so AGENTFIELD_CONNECTOR_CAP_CONFIG_MANAGEMENT env var was silently
+ignored. This caused connector config routes to not be accessible
+when configured via environment variables (e.g. Railway deployments).
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ff098c1)
+
 ## [0.1.50] - 2026-03-10
 
 ## [0.1.50-rc.2] - 2026-03-10
