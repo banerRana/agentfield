@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.53-rc.1] - 2026-03-12
+
+
+### Fixed
+
+- Fix: update estimate_cli_cost for litellm v1.80+ API (#261)
+
+* fix: update estimate_cli_cost for litellm v1.80+ API
+
+litellm removed prompt_tokens/completion_tokens kwargs from
+completion_cost() in v1.80. Switch to prompt/completion string
+params which litellm tokenizes internally.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: update cost estimation test for litellm v1.80+ API
+
+The test was asserting token_counter calls and prompt_tokens/completion_tokens
+kwargs which were removed in the implementation fix. Update to match the new
+prompt/completion string params API.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (4583e3c)
+
 ## [0.1.52] - 2026-03-12
 
 ## [0.1.52-rc.2] - 2026-03-12
