@@ -36,12 +36,14 @@ class HeartbeatData:
     status: AgentStatus
     mcp_servers: List[MCPServerHealth]
     timestamp: str
+    version: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "status": self.status.value,
             "mcp_servers": [server.to_dict() for server in self.mcp_servers],
             "timestamp": self.timestamp,
+            "version": self.version,
         }
 
 
@@ -228,8 +230,7 @@ class DiscoveryResponse:
             total_skills=int(data.get("total_skills", 0)),
             pagination=DiscoveryPagination.from_dict(data.get("pagination") or {}),
             capabilities=[
-                AgentCapability.from_dict(cap)
-                for cap in data.get("capabilities") or []
+                AgentCapability.from_dict(cap) for cap in data.get("capabilities") or []
             ],
         )
 
@@ -275,6 +276,65 @@ class DiscoveryResult:
     json: Optional[DiscoveryResponse] = None
     compact: Optional[CompactDiscoveryResponse] = None
     xml: Optional[str] = None
+
+
+class HarnessConfig(BaseModel):
+    provider: str = Field(
+        ...,
+        description='Coding agent provider: "claude-code" | "codex" | "gemini" | "opencode"',
+    )
+    model: str = Field(default="sonnet", description="Default model identifier.")
+    max_turns: int = Field(default=30, description="Maximum agent iterations.")
+    max_budget_usd: Optional[float] = Field(
+        default=None, description="Cost cap in USD."
+    )
+    max_retries: int = Field(
+        default=3, description="Maximum retry attempts for transient errors."
+    )
+    initial_delay: float = Field(
+        default=1.0, description="Initial retry delay in seconds."
+    )
+    max_delay: float = Field(
+        default=30.0, description="Maximum retry delay in seconds."
+    )
+    backoff_factor: float = Field(default=2.0, description="Retry backoff multiplier.")
+    tools: List[str] = Field(
+        default_factory=lambda: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        description="Default allowed tools.",
+    )
+    permission_mode: Optional[str] = Field(
+        default=None, description='Permission mode: "plan" | "auto" | None'
+    )
+    system_prompt: Optional[str] = Field(
+        default=None, description="Default system prompt."
+    )
+    env: Dict[str, str] = Field(
+        default_factory=dict, description="Environment variables for the agent."
+    )
+    cwd: Optional[str] = Field(default=None, description="Default working directory.")
+    project_dir: Optional[str] = Field(
+        default=None,
+        description=(
+            "Project directory for the coding agent to explore (e.g. a target "
+            "repository path). Maps to --dir in opencode. When set, cwd is used "
+            "only for output file placement while project_dir controls the "
+            "agent's working context."
+        ),
+    )
+    codex_bin: str = Field(default="codex", description="Path to codex binary.")
+    gemini_bin: str = Field(default="gemini", description="Path to gemini binary.")
+    opencode_bin: str = Field(
+        default="opencode", description="Path to opencode binary."
+    )
+    opencode_server: Optional[str] = Field(
+        default=None,
+        description=(
+            "URL of a running ``opencode serve`` instance "
+            '(e.g. "http://127.0.0.1:4096"). When set, the opencode provider '
+            "uses ``--attach`` mode which avoids the standalone session bug. "
+            "Falls back to OPENCODE_SERVER env var."
+        ),
+    )
 
 
 class AIConfig(BaseModel):
@@ -374,27 +434,27 @@ class AIConfig(BaseModel):
 
     # Rate limiting configuration
     rate_limit_max_retries: int = Field(
-        default=20,
-        description="Maximum number of retries for rate limit errors (allows up to ~20 minutes of retries).",
+        default=5,
+        description="Maximum number of retries for rate limit errors.",
     )
     rate_limit_base_delay: float = Field(
-        default=1.0,
+        default=0.5,
         description="Base delay for rate limit exponential backoff in seconds.",
     )
     rate_limit_max_delay: float = Field(
-        default=300.0,
-        description="Maximum delay for rate limit backoff in seconds (5 minutes).",
+        default=30.0,
+        description="Maximum delay for rate limit backoff in seconds.",
     )
     rate_limit_jitter_factor: float = Field(
         default=0.25,
         description="Jitter factor for rate limit backoff (±25% randomization).",
     )
     rate_limit_circuit_breaker_threshold: int = Field(
-        default=10,
+        default=5,
         description="Number of consecutive rate limit failures before opening circuit breaker.",
     )
     rate_limit_circuit_breaker_timeout: int = Field(
-        default=300, description="Circuit breaker timeout in seconds (5 minutes)."
+        default=30, description="Circuit breaker timeout in seconds."
     )
     enable_rate_limit_retry: bool = Field(
         default=True, description="Enable automatic retry for rate limit errors."

@@ -1,15 +1,47 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/logger"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 )
+
+// normalizeDIDWeb re-encodes port separators that Gin URL-decoded in did:web identifiers.
+// Gin decodes %3A → : in path params, but the database stores the canonical form with %3A.
+// e.g. did:web:localhost:8080:agents:foo → did:web:localhost%3A8080:agents:foo
+func normalizeDIDWeb(did string) string {
+	if !strings.HasPrefix(did, "did:web:") {
+		return did
+	}
+	parts := strings.Split(did, ":")
+	// Canonical: ["did", "web", "domain%3Aport", "agents", "id"] → 5 parts
+	// Decoded:   ["did", "web", "domain", "port", "agents", "id"] → 6+ parts
+	if len(parts) >= 6 && isAllDigits(parts[3]) {
+		parts[2] = parts[2] + "%3A" + parts[3]
+		parts = append(parts[:3], parts[4:]...)
+	}
+	return strings.Join(parts, ":")
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
 
 // DIDService defines the DID operations required by handlers.
 type DIDService interface {
@@ -27,12 +59,19 @@ type VCService interface {
 	QueryExecutionVCs(filters *types.VCFilters) ([]types.ExecutionVC, error)
 	ListWorkflowVCs() ([]*types.WorkflowVC, error)
 	GetExecutionVCByExecutionID(executionID string) (*types.ExecutionVC, error)
+	ListAgentTagVCs() ([]*types.AgentTagVCRecord, error)
+}
+
+// DIDWebResolverService defines did:web resolution operations.
+type DIDWebResolverService interface {
+	ResolveDID(ctx context.Context, did string) (*types.DIDResolutionResult, error)
 }
 
 // DIDHandlers handles DID-related HTTP requests.
 type DIDHandlers struct {
-	didService DIDService
-	vcService  VCService
+	didService    DIDService
+	vcService     VCService
+	didWebService DIDWebResolverService
 }
 
 // NewDIDHandlers creates a new DID handlers instance.
@@ -41,6 +80,11 @@ func NewDIDHandlers(didService DIDService, vcService VCService) *DIDHandlers {
 		didService: didService,
 		vcService:  vcService,
 	}
+}
+
+// SetDIDWebService sets the did:web resolver for hybrid DID resolution.
+func (h *DIDHandlers) SetDIDWebService(svc DIDWebResolverService) {
+	h.didWebService = svc
 }
 
 // RegisterAgent handles agent DID registration requests.
@@ -71,12 +115,30 @@ func (h *DIDHandlers) RegisterAgent(c *gin.Context) {
 // ResolveDID handles DID resolution requests.
 // GET /api/v1/did/resolve/:did
 func (h *DIDHandlers) ResolveDID(c *gin.Context) {
-	did := c.Param("did")
+	did := normalizeDIDWeb(c.Param("did"))
 	if did == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "DID parameter is required"})
 		return
 	}
 
+	// Try did:web resolution first (database-stored documents)
+	if h.didWebService != nil && strings.HasPrefix(did, "did:web:") {
+		result, err := h.didWebService.ResolveDID(c.Request.Context(), did)
+		if err == nil && result.DIDDocument != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"did":            result.DIDDocument.ID,
+				"did_document":   result.DIDDocument,
+				"component_type": "agent_node",
+			})
+			return
+		}
+		if err == nil && result.DIDResolutionMetadata.Error == "deactivated" {
+			c.JSON(http.StatusGone, gin.H{"error": "DID has been revoked"})
+			return
+		}
+	}
+
+	// Fall back to did:key resolution (in-memory registry)
 	identity, err := h.didService.ResolveDID(did)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "DID not found"})
@@ -364,11 +426,19 @@ func (h *DIDHandlers) ExportVCs(c *gin.Context) {
 		})
 	}
 
+	// Query agent tag VCs
+	agentTagVCs, err := h.vcService.ListAgentTagVCs()
+	if err != nil {
+		logger.Logger.Debug().Err(err).Msg("Failed to list agent tag VCs")
+		agentTagVCs = []*types.AgentTagVCRecord{}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"agent_dids":      agentDIDs,
-		"execution_vcs":   executionVCsExport,
-		"workflow_vcs":    workflowVCs,
-		"total_count":     len(executionVCs) + len(workflowVCs),
+		"agent_dids":    agentDIDs,
+		"execution_vcs": executionVCsExport,
+		"workflow_vcs":  workflowVCs,
+		"agent_tag_vcs": agentTagVCs,
+		"total_count":   len(executionVCs) + len(workflowVCs) + len(agentTagVCs),
 		"filters_applied": filters,
 	})
 }
@@ -376,7 +446,7 @@ func (h *DIDHandlers) ExportVCs(c *gin.Context) {
 // GetDIDDocument handles DID document requests (W3C DID standard).
 // GET /api/v1/did/document/:did
 func (h *DIDHandlers) GetDIDDocument(c *gin.Context) {
-	did := c.Param("did")
+	did := normalizeDIDWeb(c.Param("did"))
 	if did == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "DID parameter is required",
@@ -384,7 +454,20 @@ func (h *DIDHandlers) GetDIDDocument(c *gin.Context) {
 		return
 	}
 
-	// Resolve DID to get identity information
+	// Try did:web resolution first (database-stored documents)
+	if h.didWebService != nil && strings.HasPrefix(did, "did:web:") {
+		result, err := h.didWebService.ResolveDID(c.Request.Context(), did)
+		if err == nil && result.DIDDocument != nil {
+			c.JSON(http.StatusOK, result.DIDDocument)
+			return
+		}
+		if err == nil && result.DIDResolutionMetadata.Error == "deactivated" {
+			c.JSON(http.StatusGone, gin.H{"error": "DID has been revoked"})
+			return
+		}
+	}
+
+	// Fall back to did:key resolution (in-memory registry)
 	identity, err := h.didService.ResolveDID(did)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{

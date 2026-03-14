@@ -6,6 +6,2092 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.57-rc.1] - 2026-03-14
+
+
+### Fixed
+
+- Fix: capture stderr from Claude Code CLI for error diagnosis (#268)
+
+* fix: capture stderr from Claude Code CLI for error diagnosis
+
+The ClaudeCodeProvider was not passing a stderr callback to
+ClaudeAgentOptions, so when the claude CLI exited with code 1,
+the actual error message was lost. Logs only showed "Command
+failed with exit code 1" with no actionable details.
+
+Now passes a stderr callback that collects output and includes
+it in both the error log and the RawResult.error_message field.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix: set stderr callback on opts object, not agent_options dict
+
+Avoids test assertion failures caused by unexpected 'stderr' key
+in the agent_options dictionary.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (afcbeee)
+
+## [0.1.56] - 2026-03-13
+
+## [0.1.56-rc.1] - 2026-03-13
+
+
+### Fixed
+
+- Fix: prevent async executions from getting stuck in running state (#267)
+
+Two issues caused async executions to remain in "running" state forever
+when the reasoner failed:
+
+1. SDK: asyncio.create_task() return values were not stored, making
+   fire-and-forget tasks eligible for GC before the status callback
+   could be delivered. Now stored in a set with auto-cleanup via
+   done_callback. Also increased callback timeout from 10s to 30s
+   since the shared httpx client's default is too aggressive for
+   concurrent status updates over internal networking.
+
+2. CP: stale execution reaper ran every 1h with a 30m timeout (worst
+   case ~90min to clean up). Reduced to 5m interval with 10m timeout
+   so stuck executions are marked as timed-out within 15 minutes.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (950b01c)
+
+## [0.1.55] - 2026-03-13
+
+## [0.1.55-rc.1] - 2026-03-13
+
+
+### Fixed
+
+- Fix(sdk): tune rate limiter defaults for fail-fast behavior (#265)
+
+Reduce exponential backoff aggressiveness to prevent 2+ hour workflow
+runtimes when using rate-limited providers like OpenRouter. The previous
+defaults (20 retries, 300s max delay, 300s circuit breaker) caused
+cascading backoff that compounded across parallel agents.
+
+New defaults: 5 retries, 0.5s base delay, 30s max delay, circuit breaker
+threshold 5 with 30s timeout. Max theoretical wait per call drops from
+~100 minutes to ~2.5 minutes.
+
+Changes:
+- Python StatelessRateLimiter: max_retries 20→5, base_delay 1.0→0.5,
+  max_delay 300→30, circuit_breaker_threshold 10→5, timeout 300→30
+- TypeScript StatelessRateLimiter: identical parameter changes
+- AIConfig: updated Field defaults to match rate limiter
+- Added functional tests validating new defaults and max wait bounds
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (486ff3d)
+
+## [0.1.54] - 2026-03-13
+
+## [0.1.54-rc.2] - 2026-03-13
+
+
+### Added
+
+- Feat(sdk): surface cost_usd and usage from .ai() responses (#264)
+
+* feat(sdk): surface cost_usd and usage from .ai() responses
+
+MultimodalResponse now exposes cost_usd (estimated via litellm) and
+usage (token counts) extracted from litellm response objects.  This
+enables downstream consumers like pr-af to track .ai() call costs
+instead of hardcoding them to zero.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: remove unused pytest import to pass linting
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (3944cb6)
+
+
+
+### Documentation
+
+- Docs: add UTM tracking to example project links in README
+
+Replace direct GitHub links for SWE-AF, Deep Research, MongoDB, and
+sec-af with tracked redirects through agentfield.ai/github/* routes
+to measure README-driven traffic via Umami analytics. (96cbb77)
+
+## [0.1.54-rc.1] - 2026-03-13
+
+
+### Fixed
+
+- Fix: reap stale workflow executions and use updated_at for staleness (#262)
+
+* fix: reap stale workflow executions and use updated_at for staleness detection
+
+The existing MarkStaleExecutions only covered the executions table and
+used started_at to detect staleness, which missed orphaned workflow
+executions entirely and could incorrectly timeout legitimately long-running
+executions. This change:
+
+- Switches staleness detection from started_at to updated_at so only
+  executions with no recent activity are reaped
+- Adds MarkStaleWorkflowExecutions to handle the workflow_executions
+  table where orphaned child executions get permanently stuck in
+  running state when their parent fails
+- Wires both into the existing ExecutionCleanupService background loop
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* test: add functional tests for stale execution reaper with real SQLite
+
+Tests run against a real database (no mocks) covering:
+- Stuck executions reaped while active ones are preserved
+- Long-running executions with recent activity NOT incorrectly reaped
+- Orphaned workflow children reaped when parent already failed
+- Waiting-state executions reaped after inactivity
+- Batch limit respected across multiple reaper passes
+- End-to-end scenario: parent fails, children stuck in both tables
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: use COALESCE fallback for NULL updated_at in stale reaper queries
+
+- Use COALESCE(updated_at, created_at, started_at) in both
+  MarkStaleExecutions and MarkStaleWorkflowExecutions to handle
+  rows where updated_at was never set
+- Add invariant comment documenting that updated_at must be bumped
+  on every meaningful activity for staleness detection to work
+- Add tests for NULL updated_at scenario on both execution types
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+Co-authored-by: Santosh <santosh@agentfield.ai> (56410a6)
+
+## [0.1.53] - 2026-03-12
+
+## [0.1.53-rc.1] - 2026-03-12
+
+
+### Fixed
+
+- Fix: update estimate_cli_cost for litellm v1.80+ API (#261)
+
+* fix: update estimate_cli_cost for litellm v1.80+ API
+
+litellm removed prompt_tokens/completion_tokens kwargs from
+completion_cost() in v1.80. Switch to prompt/completion string
+params which litellm tokenizes internally.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: update cost estimation test for litellm v1.80+ API
+
+The test was asserting token_counter calls and prompt_tokens/completion_tokens
+kwargs which were removed in the implementation fix. Update to match the new
+prompt/completion string params API.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (4583e3c)
+
+## [0.1.52] - 2026-03-12
+
+## [0.1.52-rc.2] - 2026-03-12
+
+
+### Added
+
+- Feat: add token-based cost estimation for CLI harness providers (#260)
+
+OpenCode, Gemini, and Codex providers now estimate LLM cost using
+litellm's pricing database, so HarnessResult.cost_usd is no longer
+always None for subprocess-based providers. This enables budget
+enforcement and cost reporting in downstream consumers like pr-af.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (8b94345)
+
+## [0.1.52-rc.1] - 2026-03-11
+
+
+### Fixed
+
+- Fix: use status snapshot for node status endpoints to prevent flickering (#259)
+
+GetNodeStatusHandler and BulkNodeStatusHandler were performing live HTTP
+health checks on every call (1s cache for active agents). With the UI
+polling every 3s, a single transient network failure in Railway would
+immediately return "offline", causing agent status to flicker. Now uses
+GetAgentStatusSnapshot which returns the stored status managed by the
+background HealthMonitor (which has proper 3-consecutive-failure
+debouncing and heartbeat gating). The explicit POST .../status/refresh
+endpoint remains available for on-demand live checks.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (584b995)
+
+## [0.1.51] - 2026-03-11
+
+## [0.1.51-rc.2] - 2026-03-11
+
+
+### Fixed
+
+- Fix: wire ApplyEnvOverrides into server startup (#258)
+
+* fix: wire ApplyEnvOverrides into server startup for Railway deployments
+
+The applyEnvOverrides function (handling short env var names like
+AGENTFIELD_CONNECTOR_ENABLED) was never called from the actual server
+startup path. main.go uses Viper for config loading, but Viper's
+AutomaticEnv only matches keys it already knows about from config files.
+On Railway (no config file), ALL connector env vars were silently ignored,
+causing connector routes to never be registered.
+
+Export ApplyEnvOverrides and call it after Viper unmarshal so env vars
+like AGENTFIELD_CONNECTOR_ENABLED, AGENTFIELD_CONNECTOR_TOKEN, and
+capability flags (AGENTFIELD_CONNECTOR_CAP_*) work on file-less deploys.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* feat: add connector status routes for list_nodes and get_node_status
+
+The connector's status handler was calling /api/v1/nodes (a regular API
+endpoint requiring API key auth) instead of connector-scoped routes.
+Added /api/v1/connector/nodes and /api/v1/connector/nodes/:id/status
+routes gated by status_read capability, matching the pattern used by
+other connector domains.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (c731519)
+
+## [0.1.51-rc.1] - 2026-03-11
+
+
+### Fixed
+
+- Fix: add config_management to connector capability env var map (#257)
+
+The connectorCapEnvMap was missing the config_management capability,
+so AGENTFIELD_CONNECTOR_CAP_CONFIG_MANAGEMENT env var was silently
+ignored. This caused connector config routes to not be accessible
+when configured via environment variables (e.g. Railway deployments).
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ff098c1)
+
+## [0.1.50] - 2026-03-10
+
+## [0.1.50-rc.2] - 2026-03-10
+
+
+### Fixed
+
+- Fix: skip global API key check for connector routes (#255)
+
+Connector routes have their own dedicated ConnectorTokenAuth middleware
+that enforces X-Connector-Token with constant-time comparison. The global
+APIKeyAuth middleware was incorrectly requiring the API key on these routes
+too, forcing connectors to know and send the CP's global API key — a
+credential they should never need.
+
+This adds a prefix skip for /api/v1/connector/ in APIKeyAuth, matching
+the existing pattern for /health, /ui, and /api/v1/did/ routes.
+
+Also adds comprehensive functional tests for the full connector auth chain:
+- ConnectorTokenAuth (valid/invalid/missing token, audit metadata injection)
+- ConnectorCapabilityCheck (enabled/disabled/read-only/missing capabilities)
+- Integration tests proving connector routes reject requests without a valid
+  connector token, even though they bypass the global API key check
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (6d969a1)
+
+## [0.1.50-rc.1] - 2026-03-10
+
+
+### Added
+
+- Feat: database-backed configuration storage (#254)
+
+* feat: database-backed configuration storage
+
+Add ability to store and manage configuration files in the database
+instead of (or in addition to) YAML files on disk. This enables
+remote config management via the connector/SaaS flow.
+
+- Add ConfigStorageModel with versioning and audit fields
+- Implement SetConfig/GetConfig/ListConfigs/DeleteConfig in storage layer
+- Add config CRUD API endpoints (GET/PUT/DELETE /api/v1/configs/:key)
+- Add connector-scoped config routes gated by config_management capability
+- Add AGENTFIELD_CONFIG_SOURCE=db flag to load config from database at startup
+- Add Goose migration 028_create_config_storage.sql
+- Works on both SQLite and PostgreSQL backends
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* feat: add hot-reload endpoint for database-backed configuration
+
+Adds POST /configs/reload endpoint that re-applies database config
+to the running control plane without requiring a process restart.
+Only active when AGENTFIELD_CONFIG_SOURCE=db is set.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: merge DB config fields individually to prevent zeroing out defaults
+
+The ExecutionCleanup struct was being replaced wholesale when only
+RetentionPeriod was set, zeroing out CleanupInterval and causing a
+panic (non-positive interval for NewTicker). Now merges each field
+individually. Also excludes connector config from DB merge since
+token and capabilities are security-sensitive.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: address critical security and correctness issues in config storage
+
+- Add 1MB body size limit to SetConfig to prevent DoS via unbounded reads
+- Add sync.RWMutex to protect config during hot-reload (prevents data race)
+- Replace fragile string error check with errors.Is(err, sql.ErrNoRows)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+Co-authored-by: Santosh <santosh@agentfield.ai> (7ac9c87)
+
+## [0.1.49] - 2026-03-10
+
+
+### Fixed
+
+- Fix(install): BSD sed compatibility and env var pipe scoping in install.sh (#251)
+
+Replace GNU-only \s with POSIX [[:space:]]* in get_latest_prerelease_version()
+sed regex — \s is not recognized by macOS BSD sed, causing the version
+string to contain raw JSON instead of just the tag name.
+
+Fix documented VERSION/STAGING env var patterns: VAR=val cmd1 | cmd2
+scopes VAR to cmd1 only (POSIX shell behavior), so bash never sees it.
+Corrected to: curl ... | VERSION=X bash
+
+Fixes #250 (96c3ae9)
+
+## [0.1.49-rc.1] - 2026-03-09
+
+
+### Fixed
+
+- Fix: allow state transitions from stopping to active/starting
+
+When a node restarts while the control plane still considers it
+"stopping", heartbeats get rejected causing the node to be stuck
+offline. Allow stopping → active/starting transitions so nodes
+can recover from this state.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com> (d328e60)
+
+## [0.1.48] - 2026-03-09
+
+## [0.1.48-rc.4] - 2026-03-09
+
+
+### Fixed
+
+- Fix(sdk): catch Pydantic ValidationError in structured output parsing
+
+Pydantic v2 ValidationError does not inherit from ValueError, so schema
+validation failures (e.g. missing required fields) were not caught by
+the retry logic. This caused LLM responses with incomplete JSON to crash
+the execution instead of retrying.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com> (e2330d9)
+
+## [0.1.48-rc.3] - 2026-03-09
+
+
+### Other
+
+- Fix squished authorization table layout (#253)
+
+* Fix squished authorization table layout
+
+Widen the grid template columns for Status, Registered, and Actions
+so they don't overlap. Use flexible sizing for Registered and Actions
+columns to accommodate varying content widths.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* Fix authorization table: use fixed widths for right columns
+
+The fr-based columns were consuming nearly all space, squeezing
+Status/Registered/Actions into a tiny area. Use fixed px widths
+for the right 3 columns (matching the pattern used by other tables)
+so they get space allocated first before fr columns divide the rest.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* Fix Registered column wrapping and Actions column alignment
+
+- Add whitespace-nowrap to Registered time and action buttons so
+  "21 hours ago" and "Approve Reject" stay on one line
+- Widen Actions column to 160px to fit both buttons
+- Add "Actions" header label so all 6 columns have visible headers
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* Widen Actions column to 200px to fit Approve + Reject buttons
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* Reduce left column fr values to stop hogging space from right columns
+
+All three flexible columns now use 1fr instead of 2fr/1.5fr, giving
+equal weight and leaving more room for Status, Registered, and Actions.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (4d534b9)
+
+## [0.1.48-rc.2] - 2026-03-08
+
+
+### Added
+
+- Feat: External Cancel/Pause/Resume Execution (Epic #238) (#246)
+
+* feat(state-machine): add paused execution state and transitions (#239)
+
+- Add ExecutionStatusPaused constant and aliases to pkg/types/status.go
+- Add paused state transitions in execution_state_validation.go:
+  running→paused, paused→running, paused→cancelled
+- Update SQLite CHECK constraints in local.go
+- Add PostgreSQL migration 027_add_paused_execution_status.sql
+- Add ExecutionPaused/Resumed/Cancelled event types to event bus
+- Add publish helpers for new event types
+- Update deriveOverallStatus to handle paused workflows
+- Update frontend CanonicalStatus type, theme, badge, hex colors for paused
+
+Part of epic #238 — External Cancel/Pause Execution
+
+* feat(api): add POST /executions/:id/cancel endpoint (#240)
+
+- CancelExecutionHandler: updates execution + workflow execution to cancelled
+- Emits ExecutionCancelled event via event bus
+- Stores workflow execution event for audit trail
+- Supports optional reason field in request body
+- Returns previous_status, new status, and cancelled_at timestamp
+- Rejects cancel on terminal states (409 Conflict)
+- Returns 404 for non-existent executions
+- Registers route under agentAPI group
+- Comprehensive tests: state transitions, reason handling, edge cases
+
+* feat(api): add POST /executions/:id/pause and /resume endpoints (#241)
+
+- PauseExecutionHandler: transitions running -> paused
+- ResumeExecutionHandler: transitions paused -> running
+- Both update execution record + workflow execution atomically
+- Emit ExecutionPaused/ExecutionResumed events via event bus
+- Store workflow execution events for audit trail
+- Support optional reason field in request body
+- Strict state validation: pause only from running, resume only from paused
+- Returns previous_status, new status, and paused_at/resumed_at
+- Register routes under agentAPI group
+- Comprehensive tests using existing testExecutionStorage helpers
+
+* feat(cli): add af execution cancel|pause|resume commands (#244)
+
+- NewExecutionCommand with cancel, pause, resume subcommands
+- Shared executionActionOptions/executionActionConfig for DRY implementation
+- Supports --server, --token, --timeout, --json, --reason flags
+- Human-readable output by default, raw JSON with --json
+- User-friendly error messages for 404/409 status codes
+- Registered under RootCmd in root.go
+
+* feat(executor): enforce cancel/pause state in DAG executor (#242)
+
+- callAgent checks execution status before making HTTP call
+- Cancelled executions skip agent call and return early
+- Paused executions block in waitForResume using event bus pattern
+- waitForResume unblocks on ExecutionResumed (return nil) or
+  ExecutionCancelledEvent (return error)
+- Race condition guard: checks status before subscribing to event bus
+- asyncExecutionJob.process also checks status before callAgent
+- Tests: cancel skip, pause+resume flow, pause+cancel flow, async job skip
+
+* feat(ui): add cancel/pause/resume controls to workflow header (#243)
+
+- Add Cancel, Pause, Resume buttons to EnhancedWorkflowHeader
+- Cancel uses AlertDialog confirmation (destructive action guard)
+- Pause/Resume use ghost buttons with amber/emerald hover states
+- Mobile-responsive: icon-only on small screens, icon+label on desktop
+- Loading spinners during mutations, all buttons disabled while mutating
+- API client functions in executionsApi.ts for cancel/pause/resume
+- Routes registered under UI API group in server.go
+- NotificationProvider wraps workflow detail page for toast feedback
+- New alert-dialog.tsx component (shadcn/Radix pattern)
+
+* fix(storage): add missing 'waiting' status to SQLite and PostgreSQL CHECK constraints
+
+The 'waiting' status (used by HITL approval flow) was a valid canonical status
+in Go code but was missing from database CHECK constraints. This would cause
+INSERT/UPDATE failures when executions transition to 'waiting' state.
+
+Fixes both SQLite (local.go) and PostgreSQL (migration 027) constraints.
+
+* fix(ui): add paused status to all CanonicalStatus Record maps
+
+WorkflowNode, HoverDetailPanel, StatusSection, EnhancedWorkflowIdentity,
+and ExecutionHistoryList all had Record<CanonicalStatus, ...> maps missing
+the 'paused' entry, causing TypeScript build failures.
+
+* refactor(ui): redesign cancel/pause/resume as icon-only toolbar buttons
+
+Match existing toolbar convention (ghost variant, h-8 w-8, title tooltips).
+Remove text labels and destructive variant to reduce visual weight.
+Add separator between execution controls and view controls.
+Keeps AlertDialog confirmation for cancel safety.
+
+* fix(ui): fix paused priority in deriveOverallStatus and move graph controls to floating toolbar
+
+- Fix deriveOverallStatus() to prioritize paused over running (deliberate user
+  action takes precedence over child execution state)
+- Add 2 test cases for paused priority behavior
+- Move viewMode (Standard/Performance/Debug) and Focus mode from header to
+  bottom-left floating toolbar in graph view
+- Update EnhancedWorkflowDetailPage prop wiring for toolbar migration
+
+* feat(ui): add execution lifecycle controls, live duration, and status filter enhancements
+
+- Redesign CompactExecutionHeader with pause/cancel/resume icon buttons,
+  live elapsed time counter, refresh button, and hover card for secondary
+  details (agent, DID, workflow, input/output sizes)
+- Wrap EnhancedExecutionDetailPage with NotificationProvider for toast
+  notifications on pause/cancel/resume actions
+- Add live elapsed time display to EnhancedWorkflowHeader for running and
+  paused workflows (replaces N/A with real-time counter)
+- Add Paused and Cancelled to STATUS_FILTER_OPTIONS in PageHeader
+- Add paused to statusLabels in CompactWorkflowsTable
+
+* fix(ui): single-line headers and fix unicode triangle rendering
+
+- Convert two-line name+subtitle layout to single-line in both
+  workflow and execution detail page headers
+- Replace HTML entity &blacktriangle; with Unicode ▲ (JSX compat)
+- Replace &bull; separators with Unicode middle dot (·)
+- Remove unused Clock import from CompactExecutionHeader
+- Name appears bold, metadata appears muted on same line
+
+* fix(ui): human-readable durations, visible agent_node_id, LIVE badge → refresh dot
+
+- Replace local formatDuration with shared formatDurationHumanReadable
+  (e.g. 4487.0m → 3d 2h, 74h 43m → 3d 2h)
+- Show agent_node_id as distinct mono chip next to reasoner name
+- Remove standalone LIVE/IDLE badges from both headers
+- Add green pulsing dot on refresh button when execution is live
+- Clean up unused Clock import and underscore unused props
+
+* fix(ui): show agent_node_id in workflow header, remove steps/depth clutter
+
+- Extract root agent_node_id from DAG timeline data
+- Display as mono chip next to workflow name (same style as execution page)
+- Remove 'N steps · depth N' metadata (not useful to users)
+- Keep duration with live indicator and run ID for copying
+- Update mobile row to match desktop layout
+
+* feat(ui): redesign execution and workflow headers into 2-row layout
+
+Restructure both detail page headers from single-row into a
+semantically-organized 2-row layout with proper information hierarchy,
+responsive behavior, and mobile support.
+
+Row 1: status cluster + identity cluster + lifecycle controls
+Row 2: section navigation tabs (absorbed from separate components) + summary metrics
+
+- Rewrite CompactExecutionHeader with status dot, identity chips,
+  tooltips, controlled cancel AlertDialog, and mobile overflow menu
+- Rewrite EnhancedWorkflowHeader with webhook HoverCard, active/failed
+  badges, fullscreen toggle, and graph depth metrics
+- Move tab navigation into headers (remove standalone tab components)
+- Add mobile 3-row stacked layout with DropdownMenu overflow
+- Update both detail pages to pass tab props to headers
+
+* fix(test): resolve data race in execution cleanup test
+
+Use thread-safe syncBuffer for concurrent log writes from cleanup
+goroutine and Stop() goroutine. The bytes.Buffer is not safe for
+concurrent writes, causing race detector failures on CI.
+
+* fix: address code review issues in cancel/pause/resume feature
+
+- Add 24h timeout to waitForResume in async execution path to prevent
+  goroutine leaks when resume/cancel events are never delivered
+- Use unique subscriber IDs (with nanosecond suffix) to prevent event
+  bus collisions when parallel DAG branches wait on same execution
+- Change CancelExecutionHandler to accept ExecutionStore interface
+  instead of storage.StorageProvider for interface segregation
+- Fix pause response Reason field to use *string (matching cancel
+  response) so empty reasons are omitted from JSON via omitempty
+- Remove debug console.log from executionsApi.ts that leaked execution
+  data to browser console in production
+
+* feat(ui): redesign workflow DAG graph toolbar (#248)
+
+* feat(ui): redesign workflow DAG toolbar with unified GraphToolbar component
+
+Replace scattered graph controls (layout buttons, search, center, fit view,
+view mode toggle, focus mode) with a single compact icon-based toolbar.
+
+- Add GraphToolbar component with layout/view mode dropdowns, search, focus,
+  and smart center buttons using Phosphor icons with tooltips
+- Implement wrapped tree layout in LayoutManager for wide-branching DAGs
+  (wraps 50+ siblings into rows of N columns targeting ~1600px width)
+- Remove duplicate mrtree layout (keep Dagre tree as single tree option)
+- Extend WorkflowDAGControls with changeLayout() and onLayoutInfoChange
+- Simplify VirtualizedDAG by removing layout-related props
+- Remove SLOW warning badges, replace with subtle 'slower' text in dropdown
+- Unify default layout to tree for all graph sizes
+
+* fix(ui): clean up dead code and unused props from toolbar redesign
+
+- Delete LayoutControls.tsx (fully replaced by GraphToolbar, zero imports remain)
+- Remove unused isFullscreen prop from EnhancedWorkflowFlowProps and call site
+- Clean blank line artifacts left from removed Panel blocks
+
+* fix(handlers): move state validation inside update callbacks to eliminate TOCTOU race
+
+The cancel/pause/resume handlers previously checked execution state
+before the atomic update callback, allowing concurrent requests to
+slip through. Now the state check happens inside the callback where
+it reads the locked current value, and state-conflict errors are
+properly mapped to 409 Conflict instead of 500.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (56f7f5c)
+
+## [0.1.48-rc.1] - 2026-03-07
+
+
+### Fixed
+
+- Fix(ui): center sidebar nav icons when collapsed (#247)
+
+Remove redundant px-2 from SidebarContent that stacked with
+SidebarGroup's built-in p-2, causing 32px of horizontal padding
+inside the 48px collapsed rail. The 32px icon buttons overflowed
+right, appearing right-justified instead of centered. (6c1eebb)
+
+## [0.1.47] - 2026-03-06
+
+## [0.1.47-rc.4] - 2026-03-06
+
+
+### Fixed
+
+- Fix: include API key in note() request headers (#235)
+
+* fix: include API key in note() request headers
+
+The note() method was sending execution context headers but
+not the X-API-Key, causing 401 when the control plane has
+API key auth enabled (production). Works locally because
+local dev typically has no API key configured.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* Fix test stub to include _get_auth_headers on client
+
+The test_note_sends_async_request test was failing because the agent
+stub's client (SimpleNamespace) lacked the _get_auth_headers method
+added in the note auth fix. The _send_note coroutine calls
+self.client._get_auth_headers(), which raised AttributeError and
+silently prevented the HTTP post from executing.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (087c2c6)
+
+## [0.1.47-rc.3] - 2026-03-06
+
+
+### Other
+
+- Revert "fix: include API key in note() request headers"
+
+This reverts commit 94725ff34008e2fad19d778ec12470c213753168. (8091824)
+
+## [0.1.47-rc.2] - 2026-03-06
+
+
+### Added
+
+- Feat: add sec-af autonomous security audit to Built With examples
+
+Adds the AI Security Auditor (sec-af) showcase to the README examples
+table with a custom editorial image and link to github.com/Agent-Field/sec-af.
+
+- Add assets/examples/ai-security-auditor.png showcase image
+- Update README Built With section with new entry, description, and GitHub link (4ee4b0a)
+
+
+
+### Fixed
+
+- Fix: include API key in note() request headers
+
+The note() method was sending execution context headers but
+not the X-API-Key, causing 401 when the control plane has
+API key auth enabled (production). Works locally because
+local dev typically has no API key configured.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com> (94725ff)
+
+## [0.1.47-rc.1] - 2026-03-05
+
+
+### Documentation
+
+- Docs: add AI tool calling documentation to READMEs (#231)
+
+Document the new native LLM tool-calling feature (PR #228) in the main
+README and all three SDK READMEs with examples showing auto-discovery,
+filtered discovery, lazy hydration, guardrails, and observability.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (56bf930)
+
+## [0.1.46] - 2026-03-05
+
+## [0.1.46-rc.2] - 2026-03-05
+
+
+### Added
+
+- Feat: native LLM tool-calling support via discover → ai → call pipeline (#228)
+
+* feat: add native LLM tool-calling support via discover → ai → call pipeline (#225)
+
+Add tools= parameter to app.ai() that enables automatic tool-call loops:
+discover available capabilities, convert to LLM tool schemas, dispatch
+calls via app.call(), and feed results back until the LLM produces a
+final response.
+
+Python SDK:
+- New tool_calling module with capability-to-schema converters
+- Tool-call execution loop with multi-turn support
+- Progressive discovery (lazy schema hydration)
+- Guardrails (max_turns, max_tool_calls)
+- Per-call observability (ToolCallTrace with latency tracking)
+
+Go SDK:
+- Tool types (ToolDefinition, ToolCall) on ai.Request/Response
+- CapabilitiesToToolDefinitions converter
+- ExecuteToolCallLoop on ai.Client
+- AIWithTools convenience method on Agent
+- WithTools option for ai.Request
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(sdk/python): harden tool-calling DX — rate limiting, stream guard, typed response
+
+- Wrap tool-calling LLM calls with rate limiter and model fallbacks
+  (previously bypassed both, causing naked 429 failures in production)
+- Guard stream=True + tools= with clear ValueError
+- Type tools parameter with Union instead of Any for IDE discoverability
+- Replace monkey-patched _tool_call_trace with typed ToolCallResponse wrapper
+  (exposes .trace, .text, .response with __getattr__ delegation)
+- Track hydration_retries in ToolCallTrace for lazy hydration observability
+- Add ToolCallResponse tests and update existing tests
+
+Refs: #225, #229
+
+* fix(test): update harness schema test to match #230 prompt wording change
+
+* feat: add TS SDK tool-calling parity, lazy hydration, examples, and E2E-tested fixes
+
+- TypeScript SDK: ToolCalling.ts with full discover/filter/lazy/guardrails pipeline
+- TypeScript SDK: lazy hydration uses non-executable selection pass then hydrates
+- TypeScript SDK: OpenRouter/Ollama use .chat() API (not Responses API)
+- TypeScript SDK: ReasonerContext.aiWithTools() for ctx-level tool calling
+- Python SDK: fix invocation_target→call_target conversion in tool dispatch
+- Python/TS: tool name sanitization (colons→double underscores) for LLM compat
+- Examples: Python + TS orchestrator/worker/test covering all Sam's #225 cases
+- E2E tested with GPT-4o-mini and Gemini 2.0 Flash via OpenRouter
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(examples): use ctx.input and app.serve() in TS worker example
+
+SkillHandler receives a single SkillContext arg — input lives on ctx.input,
+not as a second parameter. Also fix app.run() → app.serve() to match the
+TS SDK's actual API. Found during E2E manual testing.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+Co-authored-by: Santosh <santosh@agentfield.ai> (40638d0)
+
+## [0.1.46-rc.1] - 2026-03-05
+
+
+### Fixed
+
+- Fix(harness): add concurrency limiter, stdout fallback, and stronger prompts (#230)
+
+Root cause: unbounded concurrent opencode subprocess calls (20+) overwhelm
+the LLM API, causing transient failures where output files are never created.
+
+Changes:
+- opencode.py: add global asyncio.Semaphore (default 3, configurable via
+  OPENCODE_MAX_CONCURRENT) to throttle concurrent opencode run processes;
+  add 600s timeout; add structured logging for finish/error states
+- _schema.py: strengthen output prompt to emphasize Write tool usage;
+  add try_parse_from_text() fallback that extracts JSON from LLM stdout
+  when the output file is missing (fenced blocks, brace matching, cosmetic repair)
+- _runner.py: wire stdout fallback after parse_and_validate in both initial
+  and retry paths
+
+Validated: full SEC-AF pipeline (11 hunt strategies, 30 verified findings)
+completes end-to-end with 0 enricher failures, vs repeated failures before. (2947d5b)
+
+## [0.1.45] - 2026-03-05
+
+## [0.1.45-rc.8] - 2026-03-05
+
+
+### Fixed
+
+- Fix(did): add did:web resolution to document endpoint (#227)
+
+* fix(did): add did:web resolution to /api/v1/did/document/:did endpoint
+
+The GetDIDDocument handler only resolved did:key identities via the
+in-memory registry. did:web lookups returned "DID not found" even when
+the agent had a valid did:web document stored in the database.
+
+Add did:web resolution (via didWebService) before falling back to
+did:key, matching the pattern already used by the ResolveDID handler
+and the server's serveDIDDocument method.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(did): normalize URL-decoded %3A in did:web path params
+
+Gin URL-decodes path parameters, turning did:web:localhost%3A8080:agents:foo
+into did:web:localhost:8080:agents:foo. The database stores the canonical
+form with %3A, so lookups failed with "DID not found".
+
+Add normalizeDIDWeb() helper that detects decoded port separators and
+re-encodes them. Applied to both ResolveDID and GetDIDDocument handlers.
+
+Manually verified against running control plane:
+- /api/v1/did/document/did:web:... → 200 with W3C DID Document
+- /api/v1/did/resolve/did:web:... → 200 with DID resolution result
+- did:key paths unchanged (no regression)
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (cdf4e8b)
+
+## [0.1.45-rc.7] - 2026-03-05
+
+
+### Added
+
+- Feat(ui): display both did:key and did:web identities (#226)
+
+* feat(ui): display both did:key and did:web identities with clear distinction
+
+The UI previously only showed did:key identifiers, making did:web
+identities invisible to users who need them for JWT and external
+integrations.
+
+Backend: Wire DIDWebService into UI DIDHandler and return did_web
+in the node DID API response.
+
+Frontend: Show both identity types as clearly separated sections
+with descriptive labels — "Cryptographic Identity" (did:key) for
+signing/auth, and "Web Identity" (did:web) for JWT/external use.
+Each has its own copy button and View Document action.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(ui): add did:web to identity API and fix unused import
+
+Wire DIDWebService into IdentityHandlers so the DID Explorer page
+returns did_web alongside did:key. Remove unused Analytics import
+that was breaking CI builds.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (8ffdc28)
+
+## [0.1.45-rc.6] - 2026-03-05
+
+
+### Added
+
+- Feat(ui): improve duration display in workflow and execution tables (#223)
+
+* feat(ui): improve duration display in workflow and execution tables
+
+- Add formatDurationHumanReadable() utility for human-readable durations
+  (e.g., '1h 2m' instead of '3748.3s')
+- Add LiveElapsedDuration component that ticks every second for running items
+  instead of showing static '-' dash
+- Update WorkflowsTable, CompactWorkflowsTable, CompactExecutionsTable,
+  and EnhancedExecutionsTable to use new duration formatting
+- Fix 'as any' type assertion in CompactExecutionsTable status prop
+
+Closes #222
+
+* docs: add screenshots for duration display PR (aa02ea1)
+
+## [0.1.45-rc.5] - 2026-03-05
+
+
+### Added
+
+- Feat(ai): retry LLM calls on malformed structured output JSON (#224)
+
+When using schema-based structured output, LLMs occasionally return
+malformed JSON that fails parsing. This adds automatic retry (up to 2
+retries) specifically for parse failures, avoiding unnecessary retries
+for network or API errors.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (a462b3a)
+
+## [0.1.45-rc.4] - 2026-03-05
+
+
+### Added
+
+- Feat(harness): OpenCode support with schema retry, error preservation, and project_dir routing (#220)
+
+* feat(harness): add schema output diagnosis and enhanced follow-up prompts
+
+Add diagnose_output_failure() that classifies validation failures into
+specific categories: file missing, empty, invalid JSON, or schema mismatch
+with field-level diff. Enhance build_followup_prompt() to include schema
+file references and explicit rewrite instructions for the retry loop.
+
+* feat(harness): add schema validation retry loop with session continuity
+
+Replace single-shot _handle_schema_output() with _handle_schema_with_retry()
+that retries up to schema_max_retries times (default 2) when JSON validation
+fails. Each retry:
+  - Diagnoses the specific failure via diagnose_output_failure()
+  - Sends a follow-up prompt to the agent with error context
+  - For Claude: passes resume=session_id to continue the conversation
+  - For CLI providers: fresh call with the follow-up prompt
+  - Accumulates cost, turns, and messages across all attempts
+
+This activates the previously dead-code build_followup_prompt() from _schema.py
+and adds resume_session_id support to the Claude Code provider.
+
+* test(harness): add complex JSON schema debug test script
+
+Standalone script exercising the harness with 5 escalating schema levels:
+  - simple (2 fields), medium (lists + optionals), complex (13 nested fields),
+    deeply_nested (recursive TreeNode), massive (>4K tokens, file-based path)
+Tested live with both claude-code and codex providers — all levels pass.
+Includes manual retry test mode (--retry-test) to exercise the new retry loop.
+
+* feat(harness): add opencode provider with project_dir routing
+
+- Rewrite opencode.py: auto-managed serve+attach pattern to bypass
+  opencode v1.2.10-v1.2.16 'Session not found' bug
+- Add project_dir field to HarnessConfig (types.py) so coding agents
+  explore the target repo instead of a temp working directory
+- Add output file placement inside project_dir (runner) so sandboxed
+  Write tool can reach the output JSON
+- Pass server_url to OpenCodeProvider via factory
+- Clean up debug prints from runner and claude provider
+- Verified working with openrouter/moonshotai/kimi-k2.5 model
+
+* fix(harness): update opencode provider tests for serve+attach pattern
+
+Tests now pass server_url to skip auto-serve lifecycle in CI where
+opencode binary is not installed. Asserts updated to match --attach
+command structure.
+
+* fix(harness): use direct opencode run for auto-approve permissions
+
+opencode run --attach loses auto-approve because the serve process
+treats attached sessions as interactive, causing permission prompts
+to hang forever when the model tries to write files.
+
+* fix(harness): align opencode tests with direct run (no --attach)
+
+* fix(harness): crash-safe retry with FailureType classification
+
+- Add FailureType enum (NONE, CRASH, TIMEOUT, API_ERROR, SCHEMA, NO_OUTPUT)
+  to RawResult and HarnessResult for intelligent retry decisions
+- Fix returncode masking in run_cli: preserve negative signal values
+- Add strip_ansi() to clean ANSI escape codes from stderr
+- Crash-aware retry in _handle_schema_with_retry: retryable failures
+  (CRASH, NO_OUTPUT) get full prompt re-send instead of immediate bail
+- build_followup_prompt now accepts optional schema param, inlines schema
+  JSON, removed poisonous empty-array hint that caused flat schema failures
+- Exponential backoff between schema retries (0.5s base, 5s max)
+- Apply same crash classification pattern to opencode, codex, gemini providers
+- Update opencode provider test for XDG_DATA_HOME env injection
+
+* fix(harness): remove double-close bug and dead serve code
+
+- write_schema_file: remove try/except that double-closed fd after
+  os.fdopen() already took ownership (caused EBADF on write failure)
+- opencode.py: remove ~100 lines of unused serve+attach machinery
+  (_ensure_serve, _cleanup_serve, _find_free_port, class-level
+  singleton state) — execute() uses direct `opencode run` and never
+  called any of it
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (909038b)
+
+- Feat(readme): replace text examples table with visual showcase cards (#216)
+
+Add 3-column visual 'Built With AgentField' section with premium
+editorial images for Autonomous Engineering Team, Deep Research Engine,
+and Reactive MongoDB Intelligence. Moved higher in README (after
+'What is AgentField?') for better visibility. Removed old text-only
+Production Examples table. (b9add36)
+
+
+
+### Chores
+
+- Chore(readme): remove redundant horizontal rules
+
+GitHub already renders ## headings with visual separation.
+The 11 --- rules created double-spacing that made the README choppy. (48baf65)
+
+## [0.1.45-rc.3] - 2026-03-04
+
+
+### Added
+
+- Feat(webhook): support all HITL template response formats (#213)
+
+* feat(webhook): support all HITL template response formats and multi-pause workflows
+
+The webhook approval handler previously only extracted the "decision" field
+from template responses, causing templates that use "action" (confirm-action,
+rich-text-editor) or have no explicit decision field (signature-capture) to
+fail silently.
+
+Changes:
+- Extract decision from "action" field as fallback when "decision" is absent
+- Default completed webhooks with no decision/action to "approved"
+- Add normalizeDecision() to map template-specific values (approve, confirm,
+  reject, deny, abort, cancel) to canonical set (approved/rejected)
+- Clear approval request fields on "approved" (not just "request_changes")
+  to support multi-pause workflows where agents issue sequential approvals
+- Add localhost:8001 to CORS allowed origins for demo UIs
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: preserve ApprovalRequestID on approved for idempotency and multi-pause
+
+The previous commit cleared ApprovalRequestID on both "approved" and
+"request_changes" decisions. This broke:
+- Idempotent webhook retries (lookup by request ID returned 404)
+- Approval-status queries (same lookup failure)
+- Callback notifications (in-memory store shared pointer was mutated)
+
+Fix:
+- Only clear ApprovalRequestID on "request_changes" (as before)
+- On "approved", clear URL fields but preserve the request ID
+- Save callback URL before the update closure to avoid shared-pointer
+  aliasing in stores that mutate objects in-place
+- Make request-approval handler multi-pause aware: check ApprovalStatus
+  is "pending" (not just ApprovalRequestID existence) so agents can
+  re-request approval after a resolved round
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (aa15d64)
+
+## [0.1.45-rc.2] - 2026-03-03
+
+
+### Added
+
+- Feat(harness): add .harness() method for external coding agent dispatch (#210)
+
+* docs: add harness v2 design document with file-write schema strategy
+
+Design document for .harness() feature — first-class coding agent integration.
+Covers architecture, provider matrix, universal file-write schema handling with
+4-layer recovery, config types, and implementation phases.
+
+Ref: #208
+
+* feat(harness): add core types, provider interface, and factory skeleton (#199)
+
+- Add HarnessConfig to types.py (provider required, sensible defaults)
+- Add HarnessResult, RawResult, Metrics result types
+- Add HarnessProvider protocol (Python) / interface (TypeScript)
+- Add build_provider() factory with supported provider validation
+- Python: 8 tests passing, TypeScript: 6 tests passing
+
+Closes #199
+
+* feat(harness): add schema handling with universal file-write strategy (#200)
+
+- Universal file-write: always instruct agent to write JSON to {cwd}/.agentfield_output.json
+- Prompt suffix generation (inline for small schemas, file-based for large >4K tokens)
+- Cosmetic JSON repair: strip markdown fences, trailing commas, truncated brackets
+- Full parse+validate pipeline with Layer 1 (direct) + Layer 2 (repair) fallback
+- Pydantic v1/v2 + Zod schema support
+- Python: 19 tests, TypeScript: 18 tests
+
+Closes #200
+
+* feat(harness): add HarnessRunner with retry and schema orchestration (#201)
+
+- Config resolution: merge HarnessConfig defaults + per-call overrides
+- Exponential backoff + jitter retry for transient errors (rate limits, 5xx, timeouts)
+- Schema orchestration: prompt suffix injection, Layer 1+2 parse/validate
+- Guaranteed temp file cleanup in finally block
+- Cost/metrics/session tracking in HarnessResult
+
+Closes #201
+
+* feat(harness): add Claude Code and Codex providers with shared CLI utilities (#202, #203)
+
+- Claude Code provider: Python uses claude_agent_sdk (lazy import), TS uses @anthropic-ai/claude-agent-sdk (dynamic import)
+- Codex provider: Python + TS use CLI subprocess with shared async utilities
+- Shared CLI module: run_cli, parse_jsonl, extract_final_text for subprocess management
+- All providers implement HarnessProvider protocol with execute() method
+- 14 Python tests + 12 TypeScript tests, all passing (97 total)
+
+* feat(harness): wire .harness() into Agent class with lazy runner (#204)
+
+- Python: harness_config constructor param, lazy harness_runner property, async harness() method
+- TypeScript: harnessConfig in AgentConfig, lazy getHarnessRunner(), async harness() method
+- Package exports: HarnessConfig + HarnessResult from agentfield.__init__
+- 8 Python + 6 TypeScript wiring tests, all passing (111 total)
+
+* feat(harness): add Gemini CLI and OpenCode providers (#205, #206)
+
+- Gemini provider: CLI subprocess with -p prompt, --sandbox auto, -m model flags
+- OpenCode provider: CLI subprocess with --non-interactive, --model flags
+- Factory updated to route all 4 providers: claude-code, codex, gemini, opencode
+- Provider exports updated in Python + TypeScript
+- 10 Python + 10 TypeScript new tests, all passing (131 total)
+
+* fix(harness): address review feedback — lazy imports, trimmed exports, file permissions
+
+- Remove eager provider imports from Python providers/__init__.py (lazy loading preserved via factory)
+- Trim public API exports in Python harness/__init__.py and TypeScript harness/index.ts to only public types
+- Add 0o600 file permissions for schema/output files in _schema.py and schema.ts
+- Fix TypeScript type errors in runner.ts (tsc --noEmit clean)
+
+* feat(harness): add functional tests, fix provider bugs for Claude and OpenCode
+
+- Add 12 Python + 6 TypeScript functional tests invoking real coding agents
+- Fix Claude Code permission_mode mapping (auto → bypassPermissions)
+- Fix OpenCode CLI command (--non-interactive → run subcommand)
+- Mark OpenCode tests as xfail (upstream v1.2.10 headless bug)
+- Add harness_live pytest marker, excluded from default runs
+- Update unit test expectations for provider command changes
+
+Tested: Codex 4/4 ✅, Claude Code 4/4 ✅, cross-provider ✅
+OpenCode: upstream 'Session not found' bug (not our code)
+
+* perf(harness): fix import/allocation regression — lazy imports, WeakMap, async factory
+
+- TS: Replace eager HarnessRunner import with dynamic import() in Agent.ts
+- TS: Use WeakMap instead of class property for _harnessRunner (keeps V8 inline)
+- TS: Make buildProvider async with per-provider dynamic imports in factory.ts
+- Python: Move HarnessRunner import to TYPE_CHECKING + lazy import in property
+- Update all 8 test files for async buildProvider/getHarnessRunner changes
+- All 131 unit tests passing (69 Python + 62 TypeScript)
+- tsc --noEmit clean
+
+* fix(harness): use typing.List for Python 3.8 compat in functional test
+
+Pydantic evaluates annotations at runtime via eval(), so list[str]
+(PEP 585) fails on Python 3.8 even with 'from __future__ import
+annotations'. Use typing.List[str] instead.
+
+* feat(harness): add optional 'harness' and 'harness-claude' extras in pyproject.toml
+
+Users can now install the Claude Code SDK dependency declaratively:
+  pip install agentfield[harness]        # all harness provider deps
+  pip install agentfield[harness-claude]  # just Claude Code SDK
+
+Codex, Gemini, and OpenCode are CLI binaries — no pip packages needed.
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ef1fac5)
+
+## [0.1.45-rc.1] - 2026-03-02
+
+
+### Fixed
+
+- Fix: allow empty input for parameterless skills/reasoners (#198)
+
+* fix: allow empty input for parameterless skills/reasoners (#196)
+
+Remove binding:"required" constraint on Input field in ExecuteRequest and
+ExecuteReasonerRequest structs. Gin interprets required on maps as
+"must be present AND non-empty", which rejects the valid {"input":{}}
+payload that SDKs send for parameterless calls.
+
+Also remove the explicit len(req.Input)==0 check in prepareExecution and
+add nil-input guards in the reasoner and skill handlers to match the
+existing pattern in execute.go.
+
+Closes #196
+
+* test: strengthen empty-input handler coverage
+
+* fix: update empty_input_test.go for ExecuteHandler signature change
+
+Main added an internalToken parameter to ExecuteHandler in PR #197.
+Update the two test call sites to pass empty string for the new param.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (cbdc23a)
+
+## [0.1.44] - 2026-03-02
+
+## [0.1.44-rc.3] - 2026-03-02
+
+
+### Documentation
+
+- Docs: add human-in-the-loop approval docs to SDK READMEs (#212)
+
+Add approval workflow documentation with code examples to all three
+SDK READMEs (Python, TypeScript, Go), covering the waiting state
+feature for pausing agent execution pending human review.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (88f24cf)
+
+## [0.1.44-rc.2] - 2026-03-02
+
+
+### Testing
+
+- Test(control-plane): add execution cleanup service coverage (#195) (5a227cf)
+
+## [0.1.44-rc.1] - 2026-03-02
+
+
+### Added
+
+- Feat: waiting state with approval workflows, VC-based authorization, and multi-version reasoners (#197)
+
+* feat(control-plane): add VC-based authorization foundation
+
+This commit introduces the foundation for the new VC-based authorization
+system that replaces API key distribution with admin-approved permissions.
+
+Key components added:
+- Architecture documentation (docs/VC_AUTHORIZATION_ARCHITECTURE.md)
+- Database migrations for permission approvals, DID documents, and protected agents
+- Core types for permissions and did:web support
+- DIDWebService for did:web generation, storage, and resolution
+- PermissionService for permission requests, approvals, and VC issuance
+
+The system enables:
+- Agents self-assigning tags (identity declaration)
+- Admin approval workflow for protected agent access
+- Real-time revocation via did:web
+- Control plane as source of truth for approvals
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+* feat(vc-authorization): complete VC-based authorization system implementation
+
+- Add DID authentication middleware with Ed25519 signature verification
+- Add permission checking middleware for protected agent enforcement
+- Implement admin API handlers for permission management (approve/reject/revoke)
+- Add permission request and check API endpoints
+- Implement storage layer for DID documents, permission approvals, protected agent rules
+- Add comprehensive integration test suite (14 test functions covering all phases)
+- Add Admin UI pages: PendingPermissions, PermissionHistory, ProtectedAgents
+- Add Go SDK DID authentication support
+- Add Python SDK DID authentication support
+- Fix CI to enable FTS5 tests (previously all SQLite-dependent tests were skipped)
+- Add security documentation for DID authentication
+- Add implementation guide documentation
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+
+* fix(control-plane): fix pre-existing test bugs exposed by FTS5 build tag
+
+TestGetNodeDetailsHandler_Structure expected HTTP 400 for missing route
+param but Gin returns 404. TestGetNodeStatusHandler_Structure was missing
+a mock expectation for GetAgentStatus causing a panic.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(control-plane): fix pre-existing test bugs exposed by FTS5 build tag
+
+The CI workflow change from `go test ./...` to `go test -tags sqlite_fts5 ./...`
+caused previously-skipped tests to execute, revealing 15 pre-existing bugs:
+
+- UI handler tests: Register agents in storage and configure mocks for
+  GetAgentStatus calls; fix assertions to match actual behavior (health
+  check failures mark agents inactive, not error the request)
+- VC service tests: Fix GetWorkflowVC lookups to use workflow_vc_id not
+  workflow_id; fix issuer mismatch test to tamper VCDocument JSON instead
+  of metadata field; fix error message assertion for empty VC documents
+- VC storage tests: Fix GetWorkflowVC key lookups; fix empty result assertions
+- PresenceManager tests: Register agents in storage so markInactive ->
+  UpdateAgentStatus -> GetAgentStatusSnapshot -> GetAgent succeeds; add
+  proper sync.Mutex for callback vars; use require.Eventually instead of
+  time.Sleep; set HardEvictTTL for lease deletion test
+- Webhook storage: Fix hardcoded Pending status to use webhook.Status
+- Execution records test: Fix LatestStarted assertion (CreateExecutionRecord
+  overwrites updated_at with time.Now())
+- Cleanup test: Wire countWorkflowRuns and deleteWorkflowRuns into
+  workflow cleanup path
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(control-plane): fix SSE tests leaking goroutines via incorrect context cancellation
+
+Multiple SSE tests called req.Context().Done() expecting it to cancel the
+context, but Done() only returns a channel — it doesn't cancel anything.
+This caused SSE handler goroutines to block forever, leaking and eventually
+causing a 10-minute test timeout in CI.
+
+Fixed all affected tests to use context.WithCancel + explicit cancel() call,
+matching the pattern already used by the working SSE tests.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* ts sdk and bug fix on did web
+
+* feat(examples): add permission test agents and enable VC authorization config
+
+Add two example agents for manually testing the VC authorization system
+end-to-end: permission-agent-a (caller) and permission-agent-b (protected
+target). Enable authorization in the default config with seeded protection
+rules.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* Fixes
+
+* fix(sdk-python): update test fakes for DID credential wiring in _register_agent_with_did
+
+The previous commit added identity_package access and client credential
+wiring to _register_agent_with_did but didn't update the test fakes.
+_FakeDIDManager now provides a realistic identity_package and
+_FakeAgentFieldClient supports set_did_credentials, so the full
+registration path is exercised in tests.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* more improvements
+
+* 6th iteration of fixes
+
+* end to end tested
+
+* feat(sdk): add Go & TS permission test agents, fix DID auth signing
+
+- Add Go permission test agents (caller + protected target with 3 reasoners)
+- Add TS permission test agents (caller + tag-protected target with VC generation)
+- Fix TS SDK DID auth: pass pre-serialized JSON string to axios to ensure
+  signed bytes match what's sent on the wire
+- Fix Python SDK test for async execution manager payload serialization change
+- Add go-perm-target protection rule to config
+- Gitignore compiled Go agent binaries
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(sdk-ts): update header-forwarding test for pre-serialized JSON body
+
+The execute() method now passes a JSON string instead of an object to
+axios for DID auth signing consistency. Update test assertion to match.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* manual testing updates
+
+* fix(vc-auth): fix re-approval deadlock, empty caller_agent_id, and error propagation
+
+- Fix re-approval deadlock: expand auto-request condition to trigger for
+  revoked/rejected statuses, not just empty (permission.go)
+- Fix empty caller_agent_id: add DID registry fallback in
+  ResolveAgentIDByDID for did:key resolution (did_service.go, did_web_service.go)
+- Fix HTTP 200 for failed executions: return 502 with proper error details
+  when inner agent-to-agent calls fail (execute.go)
+- Fix error propagation across all 3 SDKs:
+  - Go SDK: add ExecuteError type preserving status code and error_details
+  - TS SDK: propagate err.responseData as error_details in all error handlers
+  - Python SDK: add ExecuteError class, extract JSON body from 4xx responses
+    instead of losing it via raise_for_status(), propagate error_details in
+    async callback payloads
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix go missing func
+
+* address dx changes
+
+* temp
+
+* more fixes
+
+* finalized
+
+* better error prop
+
+* fix: update TS DID auth tests to match nonce-based signing format
+
+Tests expected the old 3-header format ({timestamp}:{bodyHash}) but the
+implementation correctly uses 4 headers with nonce ({timestamp}:{nonce}:{bodyHash}),
+matching Go and Python SDKs.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: add rate limiting to DID auth middleware on execution endpoints
+
+Addresses code scanning alert about missing rate limiting on the
+authorization route handler. Adds a sliding-window rate limiter
+(30 requests per IP per 60s) to the local verification middleware.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: use express-rate-limit for DID auth middleware to satisfy CodeQL
+
+Replace custom Map-based rate limiter with express-rate-limit package,
+which CodeQL recognizes as a proper rate limiting implementation.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: remove duplicate countWorkflowRuns method from rebase
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* UI cleanup
+
+* pydantic formatting fix
+
+* connector changes
+
+* implemented multi agents with versioning
+
+* feat(ui): polished authorization page with unified tabs and visual standardization
+
+Replace separate TagApprovalPage and AccessPoliciesPage with a single
+tabbed AuthorizationPage. Add polished authorization components:
+- AccessRulesTab: 48px rows, sorted policies, ALLOW/DENY border colors
+- AgentTagsTab: all agents with tag data, sorted, neutral badges
+- ApproveWithContextDialog: tag selection with policy impact preview
+- PolicyFormDialog: chip-input for tags with known-tag suggestions
+- PolicyContextPanel: shows affected policies for selected tags
+- RevokeDialog: neutral styling, optional reason
+- ChipInput, TooltipTagList: reusable tag UI components
+
+Backend additions:
+- GET /api/ui/v1/authorization/agents: returns all agents with tag data
+- GET /api/v1/admin/tags: returns all known tags from agents & policies
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* multi versioning connector setup
+
+* add agent to agent direct checks
+
+* bugfixes on connector
+
+* QA fixes
+
+* package lock
+
+* bug fixes on permissions & versioning flow
+
+* fix: add missing DeleteAgentVersion stub and guard postgres migration for fresh DBs
+
+Two CI failures:
+
+1. linux-tests: stubStorage in server_routes_test.go was missing the
+   DeleteAgentVersion method added to the StorageProvider interface
+   by the multi-version work. Add the stub.
+
+2. Functional Tests (postgres): migrateAgentNodesCompositePKPostgres
+   tried to ALTER TABLE agent_nodes before GORM created it on fresh
+   databases. The information_schema.columns query returns count=0
+   (not an error) when the table doesn't exist, so the function
+   proceeded to run ALTER statements against a nonexistent table.
+   Add an explicit table existence check matching the pattern already
+   used by the SQLite migration path.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* add postgres testing to dev
+
+* wait flow
+
+* improvements
+
+* bugfix on reasoner path
+
+* reasoner name mismatch fix
+
+* fix skill name mismatch bug
+
+* fix: update test to include approval_expires_at column
+
+The merge brought in a test from main that expected 42 columns in the
+workflow execution insert query, but the feature branch added
+approval_expires_at as the 43rd column. Update the test's column list
+and expected placeholder count to match.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: remove unused httpx import in test_approval.py
+
+Ruff lint flagged the unused import (F401). The tests use httpx_mock
+fixture from pytest-httpx, not httpx directly.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: resolve Python and TypeScript SDK test failures
+
+Python SDK:
+- Add pytest-httpx dependency (with Python >=3.10 constraint)
+- Register httpx_mock marker for --strict-markers compatibility
+- Add importorskip for graceful skip on Python <3.10
+- Fix request_approval test calls to match actual API signature
+
+TypeScript SDK:
+- Call server.closeAllConnections() before server.close() in
+  afterEach to prevent keep-alive connection timeout in tests
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: update test URL to match reasoner name-based endpoint path
+
+After the reasoner name fix, @agent.reasoner(name="reports_generate")
+registers at /reasoners/reports_generate (the explicit name), not
+/reasoners/generate_report (the function name).
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* add examples for waiting state
+
+* fix: resolve Gin route parameter conflict between waiting-state and tag-vc endpoints
+
+The waiting-state feature added routes under /api/v1/agents/:node_id/...
+which conflicted with the existing tag-vc endpoint using :agentId as
+the parameter name. Gin requires consistent wildcard names for the same
+path segment, causing a panic on server startup.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix tests
+
+* fix: correct async endpoint URLs and assertion in waiting state functional tests
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.5 <noreply@anthropic.com>
+Co-authored-by: Santosh <santosh@agentfield.ai> (414f91c)
+
+## [0.1.43] - 2026-03-02
+
+## [0.1.43-rc.1] - 2026-03-02
+
+
+### Added
+
+- Feat: VC-based authorization, sidecar management APIs, and multi-version reasoners (#188)
+
+* feat(control-plane): add VC-based authorization foundation
+
+This commit introduces the foundation for the new VC-based authorization
+system that replaces API key distribution with admin-approved permissions.
+
+Key components added:
+- Architecture documentation (docs/VC_AUTHORIZATION_ARCHITECTURE.md)
+- Database migrations for permission approvals, DID documents, and protected agents
+- Core types for permissions and did:web support
+- DIDWebService for did:web generation, storage, and resolution
+- PermissionService for permission requests, approvals, and VC issuance
+
+The system enables:
+- Agents self-assigning tags (identity declaration)
+- Admin approval workflow for protected agent access
+- Real-time revocation via did:web
+- Control plane as source of truth for approvals
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+* feat(vc-authorization): complete VC-based authorization system implementation
+
+- Add DID authentication middleware with Ed25519 signature verification
+- Add permission checking middleware for protected agent enforcement
+- Implement admin API handlers for permission management (approve/reject/revoke)
+- Add permission request and check API endpoints
+- Implement storage layer for DID documents, permission approvals, protected agent rules
+- Add comprehensive integration test suite (14 test functions covering all phases)
+- Add Admin UI pages: PendingPermissions, PermissionHistory, ProtectedAgents
+- Add Go SDK DID authentication support
+- Add Python SDK DID authentication support
+- Fix CI to enable FTS5 tests (previously all SQLite-dependent tests were skipped)
+- Add security documentation for DID authentication
+- Add implementation guide documentation
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+
+* fix(control-plane): fix pre-existing test bugs exposed by FTS5 build tag
+
+TestGetNodeDetailsHandler_Structure expected HTTP 400 for missing route
+param but Gin returns 404. TestGetNodeStatusHandler_Structure was missing
+a mock expectation for GetAgentStatus causing a panic.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(control-plane): fix pre-existing test bugs exposed by FTS5 build tag
+
+The CI workflow change from `go test ./...` to `go test -tags sqlite_fts5 ./...`
+caused previously-skipped tests to execute, revealing 15 pre-existing bugs:
+
+- UI handler tests: Register agents in storage and configure mocks for
+  GetAgentStatus calls; fix assertions to match actual behavior (health
+  check failures mark agents inactive, not error the request)
+- VC service tests: Fix GetWorkflowVC lookups to use workflow_vc_id not
+  workflow_id; fix issuer mismatch test to tamper VCDocument JSON instead
+  of metadata field; fix error message assertion for empty VC documents
+- VC storage tests: Fix GetWorkflowVC key lookups; fix empty result assertions
+- PresenceManager tests: Register agents in storage so markInactive ->
+  UpdateAgentStatus -> GetAgentStatusSnapshot -> GetAgent succeeds; add
+  proper sync.Mutex for callback vars; use require.Eventually instead of
+  time.Sleep; set HardEvictTTL for lease deletion test
+- Webhook storage: Fix hardcoded Pending status to use webhook.Status
+- Execution records test: Fix LatestStarted assertion (CreateExecutionRecord
+  overwrites updated_at with time.Now())
+- Cleanup test: Wire countWorkflowRuns and deleteWorkflowRuns into
+  workflow cleanup path
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(control-plane): fix SSE tests leaking goroutines via incorrect context cancellation
+
+Multiple SSE tests called req.Context().Done() expecting it to cancel the
+context, but Done() only returns a channel — it doesn't cancel anything.
+This caused SSE handler goroutines to block forever, leaking and eventually
+causing a 10-minute test timeout in CI.
+
+Fixed all affected tests to use context.WithCancel + explicit cancel() call,
+matching the pattern already used by the working SSE tests.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* ts sdk and bug fix on did web
+
+* feat(examples): add permission test agents and enable VC authorization config
+
+Add two example agents for manually testing the VC authorization system
+end-to-end: permission-agent-a (caller) and permission-agent-b (protected
+target). Enable authorization in the default config with seeded protection
+rules.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* Fixes
+
+* fix(sdk-python): update test fakes for DID credential wiring in _register_agent_with_did
+
+The previous commit added identity_package access and client credential
+wiring to _register_agent_with_did but didn't update the test fakes.
+_FakeDIDManager now provides a realistic identity_package and
+_FakeAgentFieldClient supports set_did_credentials, so the full
+registration path is exercised in tests.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* more improvements
+
+* 6th iteration of fixes
+
+* end to end tested
+
+* feat(sdk): add Go & TS permission test agents, fix DID auth signing
+
+- Add Go permission test agents (caller + protected target with 3 reasoners)
+- Add TS permission test agents (caller + tag-protected target with VC generation)
+- Fix TS SDK DID auth: pass pre-serialized JSON string to axios to ensure
+  signed bytes match what's sent on the wire
+- Fix Python SDK test for async execution manager payload serialization change
+- Add go-perm-target protection rule to config
+- Gitignore compiled Go agent binaries
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(sdk-ts): update header-forwarding test for pre-serialized JSON body
+
+The execute() method now passes a JSON string instead of an object to
+axios for DID auth signing consistency. Update test assertion to match.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* manual testing updates
+
+* fix(vc-auth): fix re-approval deadlock, empty caller_agent_id, and error propagation
+
+- Fix re-approval deadlock: expand auto-request condition to trigger for
+  revoked/rejected statuses, not just empty (permission.go)
+- Fix empty caller_agent_id: add DID registry fallback in
+  ResolveAgentIDByDID for did:key resolution (did_service.go, did_web_service.go)
+- Fix HTTP 200 for failed executions: return 502 with proper error details
+  when inner agent-to-agent calls fail (execute.go)
+- Fix error propagation across all 3 SDKs:
+  - Go SDK: add ExecuteError type preserving status code and error_details
+  - TS SDK: propagate err.responseData as error_details in all error handlers
+  - Python SDK: add ExecuteError class, extract JSON body from 4xx responses
+    instead of losing it via raise_for_status(), propagate error_details in
+    async callback payloads
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix go missing func
+
+* address dx changes
+
+* temp
+
+* more fixes
+
+* finalized
+
+* better error prop
+
+* fix: update TS DID auth tests to match nonce-based signing format
+
+Tests expected the old 3-header format ({timestamp}:{bodyHash}) but the
+implementation correctly uses 4 headers with nonce ({timestamp}:{nonce}:{bodyHash}),
+matching Go and Python SDKs.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: add rate limiting to DID auth middleware on execution endpoints
+
+Addresses code scanning alert about missing rate limiting on the
+authorization route handler. Adds a sliding-window rate limiter
+(30 requests per IP per 60s) to the local verification middleware.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: use express-rate-limit for DID auth middleware to satisfy CodeQL
+
+Replace custom Map-based rate limiter with express-rate-limit package,
+which CodeQL recognizes as a proper rate limiting implementation.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: remove duplicate countWorkflowRuns method from rebase
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* UI cleanup
+
+* pydantic formatting fix
+
+* connector changes
+
+* implemented multi agents with versioning
+
+* feat(ui): polished authorization page with unified tabs and visual standardization
+
+Replace separate TagApprovalPage and AccessPoliciesPage with a single
+tabbed AuthorizationPage. Add polished authorization components:
+- AccessRulesTab: 48px rows, sorted policies, ALLOW/DENY border colors
+- AgentTagsTab: all agents with tag data, sorted, neutral badges
+- ApproveWithContextDialog: tag selection with policy impact preview
+- PolicyFormDialog: chip-input for tags with known-tag suggestions
+- PolicyContextPanel: shows affected policies for selected tags
+- RevokeDialog: neutral styling, optional reason
+- ChipInput, TooltipTagList: reusable tag UI components
+
+Backend additions:
+- GET /api/ui/v1/authorization/agents: returns all agents with tag data
+- GET /api/v1/admin/tags: returns all known tags from agents & policies
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* multi versioning connector setup
+
+* add agent to agent direct checks
+
+* bugfixes on connector
+
+* QA fixes
+
+* package lock
+
+* bug fixes on permissions & versioning flow
+
+* fix: add missing DeleteAgentVersion stub and guard postgres migration for fresh DBs
+
+Two CI failures:
+
+1. linux-tests: stubStorage in server_routes_test.go was missing the
+   DeleteAgentVersion method added to the StorageProvider interface
+   by the multi-version work. Add the stub.
+
+2. Functional Tests (postgres): migrateAgentNodesCompositePKPostgres
+   tried to ALTER TABLE agent_nodes before GORM created it on fresh
+   databases. The information_schema.columns query returns count=0
+   (not an error) when the table doesn't exist, so the function
+   proceeded to run ALTER statements against a nonexistent table.
+   Add an explicit table existence check matching the pattern already
+   used by the SQLite migration path.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* add postgres testing to dev
+
+* docs: add changelog and env vars for connector, versioning, and authorization
+
+Document the feat/connector release including multi-versioning, VC-based
+authorization, and connector subsystem in CHANGELOG.md. Add authorization
+and connector environment variable sections to ENVIRONMENT_VARIABLES.md.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.5 <noreply@anthropic.com>
+Co-authored-by: Santosh <santosh@agentfield.ai> (917b49b)
+
+## [Unreleased] - feat/connector
+
+### Added
+
+- **Multi-Versioning**: Deploy multiple versions of the same agent with weighted traffic routing. Agents are now stored with composite primary key `(id, version)`, enabling canary deployments, A/B testing, and blue-green rollouts. Includes `group_id` for logical grouping, `traffic_weight` (0–10000) per version, weighted round-robin selection, and `X-Routed-Version` response header. New storage methods: `GetAgentVersion`, `ListAgentVersions`, `ListAgentGroups`, `ListAgentsByGroup`, `UpdateAgentTrafficWeight`, `DeleteAgentVersion`. (9db17be, 9ae4e62, 3d6a50b)
+
+- **VC-Based Authorization System**: Complete Verifiable Credential authorization with W3C DID identity, Ed25519 request signing, tag-based access policies, and admin approval workflows. Agents get `did:web` identities with keypairs derived from master seed. Request signing uses 4 headers (`X-Caller-DID`, `X-DID-Signature`, `X-DID-Timestamp`, `X-DID-Nonce`). Includes DID auth middleware, permission check middleware with auto-request-on-deny, admin API for approve/reject/revoke, and comprehensive integration test suite (1754+ lines). (0cde0b1, 0106624)
+
+- **Connector Subsystem**: External management API with token-based authentication and capability-based access control. Provides `/connector/*` REST endpoints for managing reasoners, versions, traffic weights, and agent groups. Supports scoped capabilities (`reasoners:read`, `versions:write`, `restart`, etc.) for CI/CD and orchestration platform integration. (3d6a50b, 9ae4e62)
+
+- **Authorization Admin UI**: Unified tabbed authorization page with Access Rules tab (ALLOW/DENY policies with color-coded borders), Agent Tags tab (manage and approve agent tags), approval dialogs with policy impact preview, and revocation support. (4ac437f)
+
+- **Agent-to-Agent Direct Verification**: SDK `LocalVerifier` modules that cache policies, revocation lists, registered DIDs, and admin public key from the control plane. Enables offline signature verification without round-tripping. Added `/api/v1/registered-dids` endpoint. Supports nonce-based signatures and `did:key` public key resolution. (d89eb23)
+
+- **SDK DID Auth Modules**:
+  - Go: `client/did_auth.go` (authenticator), `did/did_client.go` (DID client), `did/did_manager.go` (key manager), `did/vc_generator.go` (VC generation), `agent/verification.go` (LocalVerifier)
+  - Python: `did_auth.py` (Ed25519 signing), `verification.py` (LocalVerifier with async refresh)
+  - TypeScript: Expanded `LocalVerifier.ts` (registered DID caching, nonce-aware verification)
+
+- **SDK Version Propagation**: All three SDKs (Go, Python, TypeScript) now include `version` in heartbeat and shutdown payloads for multi-versioning support.
+
+- **Multi-Version Examples**: New examples for all three SDKs demonstrating versioned agent registration (`examples/ts-node-examples/multi-version/`, `examples/go_agent_nodes/cmd/multi_version/`, `examples/python_agent_nodes/multi_version/`)
+
+- **Permission Test Examples**: Caller + protected target examples for all three SDKs (`examples/python_agent_nodes/permission_agent_a/`, `examples/go_agent_nodes/cmd/permission_caller/`, etc.)
+
+- **Rate Limiting**: Added `express-rate-limit` to DID auth middleware on execution endpoints for TypeScript SDK. (6ffe576, 5cdfdf8)
+
+- **`ExecuteError` Type**: All three SDKs now surface execution errors with status code and `error_details` propagation. (c5e5556)
+
+### Fixed
+
+- **Agent health status flapping** (#169): Three independent health systems (HealthMonitor, StatusManager, PresenceManager) fought each other. Now requires 3 consecutive failures before marking inactive, reduced heartbeat DB cache from 8s to 2s. (e74ed99)
+
+- **Memory websocket blocking startup** (#165): websockets v14+ renamed `additional_headers` to `extra_headers`, and blocking reconnect prevented uvicorn from starting. Added 5s timeout and backgrounded reconnect. (4a63bec)
+
+- **Python SDK hardcoded version** (#166): Registration payload hardcoded version to "1.0.0" and omitted agent metadata. Now passes actual values. (35d2685)
+
+- **Async execution polling missing auth headers** (#180): `_poll_single_execution` and `_batch_poll_executions` did not include auth headers, causing 401 errors. (26692de)
+
+- **Re-approval deadlock**: Re-approval only triggered for empty status, not revoked/rejected. Also fixed empty `caller_agent_id` and error propagation (200 → 502 for agent-to-agent failures). (c5e5556)
+
+- **Permissions/versioning flow**: Removed `DenyAnonymous` (broke backward compat), preserved approved tags during re-registration, cleaned stale empty-version DB rows. (f9d9dcf)
+
+- **UI workflow delete 404** (#174): Cleanup route was not registered. (ee47f56)
+
+- **Workflow cleanup orphaned summaries** (#177): Deletion left behind orphaned run summaries. (ab2ce92)
+
+- **Missing DeleteAgentVersion stub**: CI failure from missing interface method and postgres migration on fresh DBs. (4f7fe7a)
+
+- **Reasoner name mismatch**: Python SDK used `func_name` instead of `reasoner_id` for endpoint path. (f427b9b)
+
+- **Reasoner path normalization**: Added execution status guards for `waiting` state, approval expiration, execution event streaming. (f7a4a4d)
+
+- **Duplicate `countWorkflowRuns`**: Removed duplicate method from rebase. (27455d7)
+
+- **Pydantic formatting**: Fixed AI response formatting in Python SDK. (6a09ce0)
+
+### Changed
+
+- Database schema uses composite primary key `(id, version)` for agent nodes (migration 015)
+- `AgentNode` type includes new fields: `GroupID`, `TrafficWeight`
+- `StorageProvider` interface expanded with version-aware methods
+- Discovery response includes `GroupID` in `AgentCapability`
+
+## [0.1.42] - 2026-02-27
+
+
+### Fixed
+
+- Fix(release): add [skip ci] to version bump commit to prevent infinite loop (#194)
+
+The release workflow pushes a version bump commit to main, which
+triggers another release workflow run, creating an infinite loop.
+Adding [skip ci] to the commit message prevents the pushed commit
+from triggering any workflows.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ff0a88f)
+
+## [0.1.42-rc.18] - 2026-02-27
+
+## [0.1.42-rc.17] - 2026-02-27
+
+## [0.1.42-rc.16] - 2026-02-27
+
+## [0.1.42-rc.15] - 2026-02-27
+
+## [0.1.42-rc.14] - 2026-02-27
+
+## [0.1.42-rc.13] - 2026-02-27
+
+## [0.1.42-rc.12] - 2026-02-27
+
+## [0.1.42-rc.11] - 2026-02-27
+
+## [0.1.42-rc.10] - 2026-02-27
+
+## [0.1.42-rc.9] - 2026-02-27
+
+## [0.1.42-rc.8] - 2026-02-27
+
+## [0.1.42-rc.7] - 2026-02-27
+
+## [0.1.42-rc.6] - 2026-02-27
+
+## [0.1.42-rc.5] - 2026-02-27
+
+
+### Chores
+
+- Chore: remove redundant CLA assistant workflow (#192)
+
+The contributor-assistant/github-action workflow requires a PAT to
+store signatures in the remote .github repo, which is not configured.
+The hosted cla-assistant.io integration (license/cla) is already
+active and working, making this workflow redundant.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (aedd982)
+
+- Chore: add CLA assistant workflow (abd1d79)
+
+- Chore: add CODEOWNERS with AbirAbbas as default reviewer (0ea7a8c)
+
+
+
+### Fixed
+
+- Fix(release): use deploy key to bypass branch protection on push (#193)
+
+The release workflow pushes version bump commits directly to main,
+which is blocked by the new branch ruleset requiring PRs. Use a
+deploy key (which is in the ruleset bypass list) instead of the
+default GITHUB_TOKEN.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (11d0889)
+
+
+
+### Other
+
+- Set up vitest testing infrastructure, with sample test cases for status badge component (#191)
+
+* Set up vitest testing infrastructure, with sample test cases for status badge component
+
+* Reversed IDE formatting from computer to prevent large diff in changelog.md
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (0c5147f)
+
+## [Unreleased]
+
+### Testing
+
+- Test(web-ui): set up vitest testing infrastructure (#103)
+
+Add unit testing infrastructure to the Web UI (`control-plane/web/client/`),
+which previously had zero test coverage.
+
+- Install vitest, @testing-library/react, @testing-library/jest-dom,
+  @testing-library/user-event, @vitest/coverage-v8, and jsdom as devDependencies
+- Add `vitest.config.ts` with jsdom environment, `@` path alias, and v8 coverage provider
+- Add `src/test/setup.ts` to extend vitest with jest-dom matchers
+- Add `src/test/components/status/StatusBadge.test.tsx` with comprehensive tests:
+    - All `AgentState`, `HealthStatus`, and `LifecycleStatus` values via `it.each`
+    - Priority ordering between `state`, `healthStatus`, and `lifecycleStatus` props
+    - `showIcon` behaviour and `size` prop smoke tests
+    - `status` prop (AgentStatus object): `status.state`, `showHealthScore` percentage
+      display, `state_transition` arrow label, and `animate-pulse` during transitions
+    - Dedicated `AgentStateBadge`, `HealthStatusBadge`, `LifecycleStatusBadge` exports
+    - `getHealthScoreColor` utility — boundary tests across all four score tiers
+    - `getHealthScoreBadgeVariant` utility — returns correct badge variant per tier
+- Add `test`, `test:watch`, and `test:coverage` scripts to package.json
+- Wire `npm run test` into `scripts/test-all.sh` alongside the existing lint step
+
+## [0.1.42-rc.4] - 2026-02-27
+
+
+### Chores
+
+- Chore(web-ui): remove dead filter components (#190)
+
+Remove 9 unused files that are not imported anywhere in the app.
+The Executions page uses PageHeader with FilterSelect dropdowns,
+not these legacy toggle-button filter components.
+
+Removed files:
+- ExecutionFilters.tsx, ExecutionsList.tsx, QuickFilters.tsx
+- SearchWithFilters.tsx, SuggestedFilters.tsx, FilterTag.tsx
+- hooks/useFilterState.ts, utils/filterUtils.ts, types/filters.ts
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ef8efe8)
+
 ## [0.1.42-rc.3] - 2026-02-24
 
 

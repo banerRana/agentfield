@@ -5,7 +5,8 @@ import {
   Copy,
   WarningFilled,
   Launch,
-  InProgress
+  InProgress,
+  PauseFilled
 } from '@/components/ui/icon-bridge';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -93,6 +94,14 @@ export function ExecutionHistoryList({ history, onLoadMore }: ExecutionHistoryLi
     },
     pending: {
       icon: <Time className="h-4 w-4 text-yellow-500" />,
+      variant: 'secondary'
+    },
+    waiting: {
+      icon: <Time className="h-4 w-4 text-amber-500 animate-pulse" />,
+      variant: 'secondary'
+    },
+    paused: {
+      icon: <PauseFilled className="h-4 w-4 text-amber-500" />,
       variant: 'secondary'
     },
     cancelled: {

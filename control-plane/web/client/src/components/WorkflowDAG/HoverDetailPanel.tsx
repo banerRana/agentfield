@@ -28,6 +28,8 @@ const STATUS_TONE_TOKEN_MAP: Record<CanonicalStatus, keyof typeof statusTone> = 
   succeeded: "success",
   failed: "error",
   running: "info",
+  paused: "warning",
+  waiting: "warning",
   queued: "warning",
   pending: "warning",
   timeout: "neutral",

@@ -127,9 +127,9 @@ func TestBuildExecutionDAG_DeepHierarchy(t *testing.T) {
 	executions := []*types.Execution{
 		{
 			ExecutionID:       rootID,
-			RunID:            "run-1",
-			Status:           "succeeded",
-			StartedAt:        time.Now(),
+			RunID:             "run-1",
+			Status:            "succeeded",
+			StartedAt:         time.Now(),
 			ParentExecutionID: nil,
 		},
 		{
@@ -417,8 +417,8 @@ func TestBuildExecutionDAG_MixedStatuses(t *testing.T) {
 
 	_, _, status, _, _, _, _ := buildExecutionDAG(executions)
 
-	// deriveOverallStatus priority: running > failed > succeeded
-	// Running has highest priority as it indicates active workflow
+	// deriveOverallStatus priority: paused > running > failed > succeeded
+	// Running has high priority as it indicates active workflow
 	require.Equal(t, "running", status)
 }
 
@@ -497,21 +497,65 @@ func TestBuildExecutionDAG_WithSessionAndActor(t *testing.T) {
 }
 
 func TestDeriveOverallStatus_PriorityOrder(t *testing.T) {
-	// Test status priority: running > failed > succeeded
 	tests := []struct {
 		name     string
 		statuses []string
 		expected string
 	}{
 		{
-			name:     "running has highest priority",
+			name:     "paused has highest priority",
+			statuses: []string{"succeeded", "paused", "running"},
+			expected: "paused",
+		},
+		{
+			name:     "paused beats running and failed",
+			statuses: []string{"paused", "running", "failed"},
+			expected: "paused",
+		},
+		{
+			name:     "running beats failed when no paused",
 			statuses: []string{"succeeded", "running", "failed"},
+			expected: "running",
+		},
+		{
+			name:     "waiting counts as running",
+			statuses: []string{"succeeded", "waiting", "succeeded"},
+			expected: "running",
+		},
+		{
+			name:     "waiting counts as running over failed",
+			statuses: []string{"succeeded", "waiting", "failed"},
+			expected: "running",
+		},
+		{
+			name:     "waiting counts as running over timeout",
+			statuses: []string{"timeout", "waiting"},
 			expected: "running",
 		},
 		{
 			name:     "failed has priority over succeeded",
 			statuses: []string{"succeeded", "failed", "succeeded"},
 			expected: "failed",
+		},
+		{
+			name:     "failed has priority over timeout",
+			statuses: []string{"succeeded", "failed", "timeout"},
+			expected: "failed",
+		},
+		{
+			name:     "timeout has priority over succeeded",
+			statuses: []string{"succeeded", "timeout", "succeeded"},
+			expected: "timeout",
+		},
+		{
+			name:     "timeout has priority over cancelled",
+			statuses: []string{"cancelled", "timeout"},
+			expected: "timeout",
+		},
+		{
+			name:     "cancelled has priority over succeeded",
+			statuses: []string{"succeeded", "cancelled", "succeeded"},
+			expected: "cancelled",
 		},
 		{
 			name:     "all succeeded",
@@ -527,6 +571,16 @@ func TestDeriveOverallStatus_PriorityOrder(t *testing.T) {
 			name:     "mixed with pending",
 			statuses: []string{"succeeded", "pending", "succeeded"},
 			expected: "running",
+		},
+		{
+			name:     "all timeout returns timeout not succeeded",
+			statuses: []string{"timeout", "timeout"},
+			expected: "timeout",
+		},
+		{
+			name:     "all cancelled returns cancelled not succeeded",
+			statuses: []string{"cancelled", "cancelled"},
+			expected: "cancelled",
 		},
 	}
 

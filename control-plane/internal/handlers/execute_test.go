@@ -50,6 +50,11 @@ func (m *MockStorageProvider) MarkStaleExecutions(ctx context.Context, staleAfte
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockStorageProvider) MarkStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error) {
+	args := m.Called(ctx, staleAfter, limit)
+	return args.Int(0), args.Error(1)
+}
+
 // Add other required methods as no-ops for the interface
 func (m *MockStorageProvider) Initialize(ctx context.Context, config interface{}) error { return nil }
 func (m *MockStorageProvider) Close(ctx context.Context) error                          { return nil }
@@ -149,6 +154,12 @@ func (m *MockStorageProvider) GetLockStatus(ctx context.Context, key string) (*t
 func (m *MockStorageProvider) RegisterAgent(ctx context.Context, agent *types.AgentNode) error {
 	return nil
 }
+func (m *MockStorageProvider) GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error) {
+	return nil, nil
+}
+func (m *MockStorageProvider) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
 func (m *MockStorageProvider) ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error) {
 	return nil, nil
 }
@@ -158,7 +169,7 @@ func (m *MockStorageProvider) UpdateAgentHealth(ctx context.Context, id string, 
 func (m *MockStorageProvider) UpdateAgentHealthAtomic(ctx context.Context, id string, status types.HealthStatus, expectedLastHeartbeat *time.Time) error {
 	return nil
 }
-func (m *MockStorageProvider) UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error {
+func (m *MockStorageProvider) UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error {
 	return nil
 }
 func (m *MockStorageProvider) UpdateAgentLifecycleStatus(ctx context.Context, id string, status types.AgentLifecycleStatus) error {
